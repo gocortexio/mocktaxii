@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <title>{% block title %}MockTAXII Demo Server{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">
+                <img src="{{ url_for('static', filename='mocktaxii-logo.png') }}" alt="MockTAXII" height="64" class="me-2">MockTAXII
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
+                            <i class="fas fa-home me-1"></i>Home
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'api_keys' %}active{% endif %}" href="{{ url_for('api_keys') }}">
+                            <i class="fas fa-key me-1"></i>API Keys
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    {% if session.authenticated %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('logout') }}">
+                                <i class="fas fa-sign-out-alt me-1"></i>Logout
+                            </a>
+                        </li>
+                    {% endif %}
+                </ul>
+                <span class="navbar-text">
+                    <i class="fas fa-server me-1"></i>TAXII 2.x Demo Server
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="container mt-3">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        {% if category == 'success' %}
+                            <i class="fas fa-check-circle me-2"></i>
+                        {% elif category == 'error' %}
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                        {% else %}
+                            <i class="fas fa-info-circle me-2"></i>
+                        {% endif %}
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Main Content -->
+    <main class="container my-3">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-dark border-top mt-2">
+        <div class="container py-3">
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="text-light">MockTAXII v0.4.0</h6>
+                    <p class="text-muted small">
+                        A comprehensive TAXII 2.x server with enhanced threat intelligence capabilities.
+                        Serves authentic STIX data with 260 Spamhaus DROP IPs and 50 MITRE ATT&CK techniques.
+                    </p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <h6 class="text-light">TAXII Endpoints</h6>
+                    <div class="small text-muted">
+                        <div>Discovery: <code>/taxii2/</code></div>
+                        <div>API Root: <code>/taxii2/api/</code></div>
+                        <div>Collections: <code>/taxii2/api/collections/</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

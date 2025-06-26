@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}API Key Management - MockTAXII{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">
+                    <i class="fas fa-key me-2"></i>API Keys
+                </h4>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createKeyModal">
+                    <i class="fas fa-plus me-2"></i>Create New Key
+                </button>
+            </div>
+            <div class="card-body">
+                {% if api_keys %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Description</th>
+                                    <th>API Key</th>
+                                    <th>Requests</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for key in api_keys %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ key.name }}</strong>
+                                        </td>
+                                        <td>
+                                            <small class="text-muted">
+                                                {{ key.description or 'No description' }}
+                                            </small>
+                                        </td>
+                                        <td>
+                                            <div class="input-group input-group-sm">
+                                                <input type="text" class="form-control font-monospace" 
+                                                       value="{{ key.key }}" readonly id="key-{{ key.id }}">
+                                                <button class="btn btn-outline-secondary" 
+                                                        onclick="copyApiKey('{{ key.id }}')">
+                                                    <i class="fas fa-copy"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-info">{{ key.request_count }}</span>
+                                        </td>
+                                        <td>
+                                            <small class="text-muted">
+                                                {{ key.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                            </small>
+                                        </td>
+                                        <td>
+                                            <form method="POST" action="{{ url_for('deactivate_api_key', key_id=key.id) }}" 
+                                                  style="display: inline;" 
+                                                  onsubmit="return confirm('Are you sure you want to deactivate this API key?')">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                <button type="submit" class="btn btn-outline-danger btn-sm">
+                                                    <i class="fas fa-ban me-1"></i>Deactivate
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-key fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">No API Keys Created</h5>
+                        <p class="text-muted">Create your first API key to start accessing the TAXII endpoints.</p>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createKeyModal">
+                            <i class="fas fa-plus me-2"></i>Create First API Key
+                        </button>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <!-- Usage Guide -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle me-2"></i>Using API Keys
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="small">Include your API key in the Authorization header when making requests to TAXII endpoints:</p>
+                
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Example cURL command:</label>
+                    <pre class="bg-dark text-light p-2 rounded small"><code>curl -H "Authorization: Bearer YOUR_API_KEY" \
+  {{ request.url_root }}taxii2/api/collections/</code></pre>
+                </div>
+                
+                <div class="alert alert-warning small">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Keep your API keys secure!</strong> 
+                    Don't share them in public repositories or logs.
+                </div>
+            </div>
+        </div>
+
+        <!-- Authentication Info -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-shield-alt me-2"></i>Authentication
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Your IP Address</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control font-monospace" 
+                               value="{{ client_ip }}" readonly id="client-ip">
+                        <button class="btn btn-outline-secondary" onclick="copyClientIp()">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    <div class="form-text">Detected via X-Forwarded-For headers when behind proxy</div>
+                </div>
+                
+                <ul class="list-unstyled small">
+                    <li class="mb-2">
+                        <i class="fas fa-check text-success me-2"></i>
+                        Bearer token authentication
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check text-success me-2"></i>
+                        Request logging and metrics
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-check text-success me-2"></i>
+                        Key deactivation support
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-info text-info me-2"></i>
+                        All TAXII endpoints require authentication
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create API Key Modal -->
+<div class="modal fade" id="createKeyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-plus me-2"></i>Create New API Key
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('create_api_key') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Name *</label>
+                        <input type="text" class="form-control" id="name" name="name" 
+                               placeholder="e.g., XSIAM Demo Key" required maxlength="100">
+                        <div class="form-text">Choose a descriptive name for this API key</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="3"
+                                  placeholder="Optional description of how this key will be used" maxlength="500"></textarea>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        A unique API key will be automatically generated for you.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-key me-2"></i>Create API Key
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyApiKey(keyId) {
+    const input = document.getElementById('key-' + keyId);
+    input.select();
+    document.execCommand('copy');
+    
+    // Show feedback
+    const button = event.target.closest('button');
+    const originalIcon = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-check"></i>';
+    
+    setTimeout(() => {
+        button.innerHTML = originalIcon;
+    }, 2000);
+}
+
+function copyClientIp() {
+    const input = document.getElementById('client-ip');
+    input.select();
+    document.execCommand('copy');
+    
+    // Show feedback
+    const button = event.target.closest('button');
+    const originalIcon = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-check"></i>';
+    
+    setTimeout(() => {
+        button.innerHTML = originalIcon;
+    }, 2000);
+}
+</script>
+{% endblock %}

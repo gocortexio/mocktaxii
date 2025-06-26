@@ -1,0 +1,44 @@
+# MockTAXII v0.4.0 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+
+services:
+  web:
+    build: .
+    ports:
+      - "5001:5000"
+    environment:
+      - DATABASE_URL=postgresql://mocktaxii:mocktaxii@db:5432/mocktaxii
+      - SESSION_SECRET=your-secret-key-here-change-in-production
+      - WTF_CSRF_ENABLED=true
+      - FLASK_ENV=production
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mocktaxii-network
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=mocktaxii
+      - POSTGRES_USER=mocktaxii
+      - POSTGRES_PASSWORD=mocktaxii
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mocktaxii"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - mocktaxii-network
+
+volumes:
+  postgres_data:
+
+networks:
+  mocktaxii-network:
+    driver: bridge
