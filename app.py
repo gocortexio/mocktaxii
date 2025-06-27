@@ -56,8 +56,9 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
 }
 
-# CSRF Protection
-app.config['WTF_CSRF_ENABLED'] = True
+# CSRF Protection - disable for local development if needed
+csrf_enabled = os.environ.get('WTF_CSRF_ENABLED', 'true').lower() == 'true'
+app.config['WTF_CSRF_ENABLED'] = csrf_enabled
 app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour
 
 # Security configurations
@@ -65,7 +66,12 @@ is_production = os.environ.get('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_SECURE'] = is_production  # HTTPS only in production
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_DOMAIN'] = None  # Allow cross-domain for local deployments
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
+
+# CSRF configuration for local deployments
+app.config['WTF_CSRF_SSL_STRICT'] = is_production  # Only require SSL in production
+app.config['WTF_CSRF_CHECK_DEFAULT'] = True
 
 # Initialize extensions
 db.init_app(app)

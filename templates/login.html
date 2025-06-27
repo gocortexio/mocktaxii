@@ -17,7 +17,9 @@
                 </p>
                 
                 <form method="POST" action="{{ url_for('login_post') }}">
+                    {% if config.WTF_CSRF_ENABLED %}
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    {% endif %}
                     <div class="mb-3">
                         <label for="password" class="form-label">Password</label>
                         <input type="password" class="form-control" id="password" name="password" 

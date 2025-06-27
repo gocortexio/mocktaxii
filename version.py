@@ -1,6 +1,6 @@
 """MockTAXII Version Information"""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __title__ = "MockTAXII"
 __description__ = "Comprehensive TAXII 2.x server with enhanced threat intelligence capabilities"
 __author__ = "MockTAXII Team"
