@@ -1,4 +1,4 @@
-# MockTAXII v0.4.0
+# MockTAXII v0.4.1
 
 A comprehensive TAXII 2.x server designed for testing XSIAM and XSOAR Threat Intelligence Management (TIM). MockTAXII offers a complete STIX/TAXII 2.1 implementation, generating realistic indicators, campaigns and reports, all with rich, interlinked relationships. Each poll produces a fresh dataset to simulate a real-world Threat Intelligence service.
 
@@ -101,6 +101,6 @@ For issues with XSIAM or XSOAR integration, verify:
 
 ---
 
-**Version**: 0.4.0  
+**Version**: 0.4.1  
 **License**: MIT  
 **Compatibility**: TAXII 2.1, STIX 2.1

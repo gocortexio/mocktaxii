@@ -7,7 +7,7 @@ set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.4.0"
+PROJECT_VERSION="0.4.1"
 COMPOSE_FILE="docker-compose.yml"
 BACKUP_DIR="./backups"
 

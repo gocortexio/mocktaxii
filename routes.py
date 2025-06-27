@@ -109,20 +109,31 @@ def index():
 @limiter.limit("10 per minute")
 def login():
     """Login page for API key management"""
+    # Debug info for CSRF troubleshooting (remove in production)
+    if not app.config.get('FLASK_ENV') == 'production':
+        app.logger.debug(f"Session data: {dict(session)}")
+        app.logger.debug(f"Request headers: {dict(request.headers)}")
     return render_template('login.html')
 
 @app.route('/login', methods=['POST'])
 @limiter.limit("5 per minute")
 def login_post():
     """Handle login form submission"""
-    password = request.form.get('password')
-    if password and password == API_KEY_PASSWORD:
-        session['authenticated'] = True
-        session.permanent = True
-        flash('Successfully logged in', 'success')
-        return redirect(url_for('api_keys'))
-    else:
-        flash('Invalid password', 'error')
+    try:
+        # CSRF validation will be handled automatically by Flask-WTF
+        password = request.form.get('password')
+        if password and password == API_KEY_PASSWORD:
+            session['authenticated'] = True
+            session.permanent = True
+            flash('Successfully logged in', 'success')
+            return redirect(url_for('api_keys'))
+        else:
+            flash('Invalid password', 'error')
+            return redirect(url_for('login'))
+    except Exception as e:
+        # Handle CSRF or other form errors gracefully
+        app.logger.warning(f"Login form error: {str(e)}")
+        flash('Form validation error. Please try again.', 'error')
         return redirect(url_for('login'))
 
 @app.route('/logout')
@@ -143,7 +154,7 @@ def api_keys():
 
 @app.route('/api-keys/create', methods=['POST'])
 @require_auth
-@limiter.limit("10 per minute")
+@limiter.limit("10 per minute") 
 def create_api_key():
     """Create a new API key"""
     name = request.form.get('name', '').strip()

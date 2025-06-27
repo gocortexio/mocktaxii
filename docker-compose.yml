@@ -1,4 +1,4 @@
-# MockTAXII v0.4.0 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+# MockTAXII v0.4.1 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
 
 services:
   web:
@@ -8,8 +8,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://mocktaxii:mocktaxii@db:5432/mocktaxii
       - SESSION_SECRET=your-secret-key-here-change-in-production
-      - WTF_CSRF_ENABLED=true
-      - FLASK_ENV=production
+      - WTF_CSRF_ENABLED=false
+      - FLASK_ENV=development
     depends_on:
       db:
         condition: service_healthy

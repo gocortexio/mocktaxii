@@ -7,7 +7,7 @@ set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.4.0"
+PROJECT_VERSION="0.4.1"
 DOMAIN="${DOMAIN:-localhost}"
 EMAIL="${LETSENCRYPT_EMAIL:-admin@example.com}"
 ENVIRONMENT="${ENVIRONMENT:-production}"
