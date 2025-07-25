@@ -1,7 +1,7 @@
 
 # MockTAXII v0.5.1
 
-A comprehensive TAXII 2.x server designed for testing XSIAM and XSOAR Threat Intelligence Management (TIM). MockTAXII offers a complete STIX/TAXII 2.1 implementation with database-driven threat intelligence, generating realistic indicators, campaigns and reports with rich, interlinked relationships. Each poll produces fresh datasets to simulate real-world threat intelligence services.
+A comprehensive TAXII 2.x server designed for testing XSIAM and XSOAR Threat Intelligence Management (TIM). MockTAXII offers a complete STIX/TAXII 2.1 implementation with database-driven mock threat intelligence, generating realistic test indicators, campaigns and reports with rich, interlinked relationships. Each poll produces fresh datasets to simulate real-world threat intelligence services for demonstration and testing purposes.
 
 ------------------------------
 ## IMPORTANT INFORMATION
@@ -21,11 +21,11 @@ A comprehensive TAXII 2.x server designed for testing XSIAM and XSOAR Threat Int
 - Docker deployment with PostgreSQL backend
 
 **📊 Comprehensive Threat Intelligence Database**
-- **1,790 authentic threat indicators** from curated sources:
+- **1,790 realistic mock threat indicators** for testing and demonstration:
   - 260 malicious IP addresses with geolocation data
   - 103 malicious domains with categorisation (phishing, malware, C2, infrastructure)
   - 39 malicious file hashes with malware family associations
-  - **1,388 CVE vulnerabilities** from CISA KEV catalogue with CVSS 3.1 scores
+  - **1,388 CVE vulnerabilities** from CISA KEV catalogue with generated CVSS 3.1 scores
 - **50+ MITRE ATT&CK technique mappings** for comprehensive threat context
 - Dynamic generation ensures fresh indicators on each poll
 
