@@ -36,6 +36,11 @@ def get_or_create_admin_password():
 
 API_KEY_PASSWORD = get_or_create_admin_password()
 
+@app.context_processor
+def inject_version():
+    """Make version available to all templates"""
+    return dict(version=f"v{__version__}")
+
 def taxii_response(data):
     """Create a proper TAXII 2.1 JSON response with correct content-type"""
     import json
@@ -66,13 +71,19 @@ def add_security_headers(response):
         "connect-src 'self'"
     )
     
-    # Security headers
+    # Enhanced security headers
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    
+    # Only add HSTS for secure connections
+    if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
+    
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=(), payment=(), usb=()'
+    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
     
     # Cache control for sensitive pages
     if request.endpoint in ['api_keys', 'login']:

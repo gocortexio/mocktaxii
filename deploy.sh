@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# MockTAXII v0.2 Docker Deployment Script
+# MockTAXII v0.5.1 Docker Deployment Script
 # Usage: ./deploy.sh [start|stop|restart|logs|status|backup|restore]
 
 set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.4.1"
+PROJECT_VERSION="0.5.1"
 COMPOSE_FILE="docker-compose.yml"
 BACKUP_DIR="./backups"
 
@@ -107,6 +107,7 @@ start_services() {
         echo "  - Web Interface: http://localhost:5001"
         echo "  - TAXII Discovery: http://localhost:5001/taxii2/"
         echo "  - Admin Password: Check container logs for randomly generated password"
+        echo "  - Note: Initial CVE data will be fetched from CISA on first startup"
         echo ""
         log_info "Use 'docker-compose logs -f' to view logs"
     else

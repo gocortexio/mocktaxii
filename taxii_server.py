@@ -59,7 +59,7 @@ class TAXIIServer:
     def get_discovery_response():
         """TAXII Discovery endpoint response"""
         return {
-            "title": "MockTAXII v0.2.1",
+            "title": "MockTAXII v0.5.1",
             "description": "A lightweight TAXII 2.x server for XSIAM demonstrations",
             "contact": "demo@mocktaxii.local",
             "default": f"/taxii2/{TAXIIServer.API_ROOT}/",
@@ -72,7 +72,7 @@ class TAXIIServer:
     def get_api_root_response():
         """TAXII API Root endpoint response"""
         return {
-            "title": "MockTAXII v0.2.1 API Root",
+            "title": "MockTAXII v0.5.1 API Root",
             "description": "Demo threat intelligence data for XSIAM testing",
             "versions": ["application/taxii+json;version=2.1"],
             "max_content_length": 10485760  # 10MB
@@ -86,7 +86,7 @@ class TAXIIServer:
                 {
                     "id": TAXIIServer.COLLECTION_ID,
                     "title": "Demo Threat Intelligence Collection",
-                    "description": "Mock STIX threat intelligence indicators for demonstration purposes",
+                    "description": "Mock STIX threat intelligence indicators for demonstration purposes by GoCortex.io",
                     "can_read": True,
                     "can_write": False,
                     "media_types": [
@@ -154,7 +154,7 @@ class TAXIIServer:
         return {
             "id": TAXIIServer.COLLECTION_ID,
             "title": "Demo Threat Intelligence Collection",
-            "description": "Mock STIX threat intelligence indicators for demonstration purposes",
+            "description": "Mock STIX threat intelligence indicators for demonstration purposes by GoCortex.io",
             "can_read": True,
             "can_write": False,
             "media_types": [

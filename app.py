@@ -84,9 +84,13 @@ with app.app_context():
     
     db.create_all()
     
-    # Seed threat actors if database is empty
-    from models import ThreatActor
+    # Seed threat actors and malicious IPs if database is empty
+    from models import ThreatActor, MaliciousIP, MaliciousDomain, MaliciousHash, CVE
     ThreatActor.seed_default_actors()
+    MaliciousIP.seed_default_ips()
+    MaliciousDomain.seed_default_domains()
+    MaliciousHash.seed_default_hashes()
+    CVE.seed_from_cisa_kev()
     
     # Import routes after app is configured
     import routes  # noqa: F401

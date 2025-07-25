@@ -1,4 +1,4 @@
-# MockTAXII v0.4.1 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+# MockTAXII v0.5.1 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
 
 services:
   web:
