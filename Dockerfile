@@ -1,17 +1,20 @@
-# MockTAXII v0.4.1 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+# MockTAXII v0.5.1 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
 # Use Python 3.11 slim image for smaller size
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies with security updates
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     curl \
     postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Copy requirements first for better layer caching
 COPY pyproject.toml uv.lock ./

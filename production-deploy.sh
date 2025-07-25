@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# MockTAXII v0.2 Production Deployment Script
+# MockTAXII v0.5.1 Production Deployment Script
 # Advanced deployment with SSL, monitoring, and security hardening
 
 set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.4.1"
+PROJECT_VERSION="0.5.1"
 DOMAIN="${DOMAIN:-localhost}"
 EMAIL="${LETSENCRYPT_EMAIL:-admin@example.com}"
 ENVIRONMENT="${ENVIRONMENT:-production}"
@@ -47,7 +47,8 @@ install_dependencies() {
         fail2ban \
         logrotate \
         certbot \
-        python3-certbot-nginx
+        python3-certbot-nginx \
+        ca-certificates
     
     # Install Docker
     if ! command -v docker &> /dev/null; then
@@ -149,6 +150,7 @@ services:
       - ENVIRONMENT=production
       - FLASK_ENV=production
       - WTF_CSRF_ENABLED=true
+      - PYTHONHTTPSVERIFY=1
     depends_on:
       db:
         condition: service_healthy
@@ -458,6 +460,7 @@ deploy_production() {
         echo ""
         log_info "Admin credentials:"
         echo "  - Password: Check application logs for randomly generated password"
+        echo "  - Note: Initial CVE data (1,388 entries) will be fetched from CISA KEV catalogue on first startup"
         echo ""
         log_info "Monitoring:"
         echo "  - Logs: docker-compose -f docker-compose.prod.yml logs -f"
