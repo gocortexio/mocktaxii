@@ -1,4 +1,4 @@
-# MockTAXII v0.5.1 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+# MockTAXII v0.5.2 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
 # Use Python 3.11 slim image for smaller size
 FROM python:3.11-slim-bookworm
 
@@ -6,15 +6,37 @@ FROM python:3.11-slim-bookworm
 WORKDIR /app
 
 # Install system dependencies with security updates
+# Addressing CVE-2023-45853 (zlib), CVE-2025-7458 (sqlite3), CVE-2025-6020 (pam), CVE-2025-6965 (sqlite3)
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     curl \
     postgresql-client \
     ca-certificates \
+    zlib1g \
+    libsqlite3-0 \
+    libpam-modules \
+    wget \
+    build-essential \
     && apt-get upgrade -y \
+    && apt-get dist-upgrade -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# CRITICAL: Update SQLite to >= 3.50.2 to address CVE-2025-6965
+# Download and compile latest SQLite source to ensure version 3.50.2+
+RUN cd /tmp && \
+    wget https://www.sqlite.org/2025/sqlite-autoconf-3500200.tar.gz && \
+    tar -xzf sqlite-autoconf-3500200.tar.gz && \
+    cd sqlite-autoconf-3500200 && \
+    ./configure --prefix=/usr/local && \
+    make && \
+    make install && \
+    ldconfig && \
+    cd / && \
+    rm -rf /tmp/sqlite-autoconf-* && \
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/sqlite.conf && \
+    ldconfig
 
 # Copy requirements first for better layer caching
 COPY pyproject.toml uv.lock ./
