@@ -13,20 +13,29 @@ echo "PostgreSQL is ready!"
 echo "Initialising database..."
 uv run python -c "
 from app import app, db
-from models import ThreatActor, MaliciousIP, MaliciousDomain, MaliciousHash, CVE
+from models import ThreatActor, MaliciousIP, MaliciousDomain, MaliciousHash, CVE, MalwareFamily, MitreTechnique, Campaign, ReportTemplate, ThreatSubnet
 with app.app_context():
     db.create_all()
     ThreatActor.seed_default_actors()
-    MaliciousIP.seed_default_ips()
+    ThreatSubnet.seed_spamhaus_subnets()
+    MaliciousIP.seed_from_subnets(target_count=50000)
     MaliciousDomain.seed_default_domains()
-    MaliciousHash.seed_default_hashes()
+    MalwareFamily.seed_malware_families()  # Seed malware families first
+    MaliciousHash.seed_default_hashes()  # This now depends on malware families
     CVE.seed_from_cisa_kev()
+    MitreTechnique.seed_mitre_techniques()
+    Campaign.seed_campaigns()
+    ReportTemplate.seed_report_templates()
     print('Database tables created and data seeded successfully')
     print(f'Threat actors: {ThreatActor.query.count()}')
     print(f'Malicious IPs: {MaliciousIP.query.count()}')
     print(f'Malicious domains: {MaliciousDomain.query.count()}')
     print(f'Malicious hashes: {MaliciousHash.query.count()}')
     print(f'CVE vulnerabilities: {CVE.query.count()}')
+    print(f'Malware families: {MalwareFamily.query.count()}')
+    print(f'MITRE ATT&CK techniques: {MitreTechnique.query.count()}')
+    print(f'Campaigns: {Campaign.query.count()}')
+    print(f'Report templates: {ReportTemplate.query.count()}')
 "
 
 # Start the application

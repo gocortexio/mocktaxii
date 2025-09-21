@@ -1,4 +1,4 @@
-# MockTAXII v0.5.2 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+# MockTAXII v0.6.0 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
 # Use Python 3.11 slim image for smaller size
 FROM python:3.11-slim-bookworm
 

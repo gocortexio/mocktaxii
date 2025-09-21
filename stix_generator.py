@@ -6,12 +6,7 @@ import random
 class STIXGenerator:
     """Generate mock STIX 2.x threat intelligence indicators"""
     
-    # All threat indicators (IPs, domains, hashes) now stored in database tables
-    
-    MALWARE_FAMILIES = [
-        "Emotet", "TrickBot", "Ryuk", "Cobalt Strike", "Mimikatz",
-        "Zeus", "Dridex", "IcedID", "BazarLoader", "QakBot"
-    ]
+    # All threat indicators (IPs, domains, hashes, malware families) now stored in database tables
     
     @staticmethod
     def generate_timestamp():
@@ -221,19 +216,60 @@ class STIXGenerator:
     
     @staticmethod
     def generate_malware_object():
-        """Generate a STIX malware object"""
-        malware_family = random.choice(STIXGenerator.MALWARE_FAMILIES)
-        return {
+        """Generate a STIX malware object using database"""
+        from models import MalwareFamily
+        
+        # Get a random malware family from database
+        malware_obj = MalwareFamily.get_random_active()
+        if not malware_obj:
+            # Fallback if no malware families in database (shouldn't happen due to seeding)
+            name = "Unknown Malware"
+            description = "Unknown malware family"
+            malware_types = ["trojan"]
+            platforms = ["windows"]
+            capabilities = []
+            external_refs = []
+            score = "medium"
+        else:
+            name = malware_obj.name
+            description = malware_obj.description or f"{name} is a known malware family used in various attack campaigns"
+            malware_types = malware_obj.malware_types or ["trojan"]
+            platforms = malware_obj.platforms or ["windows"]
+            capabilities = malware_obj.capabilities or []
+            external_refs = malware_obj.external_references or []
+            score = STIXGenerator.convert_score_to_text(malware_obj.confidence_score)
+        
+        malware_stix = {
             "type": "malware",
             "spec_version": "2.1",
             "id": f"malware--{uuid.uuid4()}",
             "created": STIXGenerator.generate_timestamp(),
             "modified": STIXGenerator.generate_timestamp(),
-            "name": malware_family,
-            "description": STIXGenerator.add_disclaimer(f"{malware_family} is a known malware family used in various attack campaigns"),
-            "malware_types": ["trojan", "backdoor"],
-            "is_family": True
+            "name": name,
+            "description": STIXGenerator.add_disclaimer(description),
+            "malware_types": malware_types,
+            "is_family": True,
+            "labels": ["malicious-activity"],
+            "score": score,
+            "x_platforms": platforms,
+            "x_capabilities": capabilities
         }
+        
+        # Add external references if available
+        if external_refs:
+            malware_stix["external_references"] = external_refs
+        
+        # Add MITRE ATT&CK reference if available
+        if malware_obj and malware_obj.mitre_id:
+            if "external_references" not in malware_stix:
+                malware_stix["external_references"] = []
+            malware_stix["external_references"].append({
+                "source_name": "mitre-attack",
+                "external_id": malware_obj.mitre_id,
+                "url": f"https://attack.mitre.org/software/{malware_obj.mitre_id}"
+            })
+        
+        return malware_stix
     
     @staticmethod
     def generate_threat_actor():
@@ -296,30 +332,57 @@ class STIXGenerator:
     
     @staticmethod
     def generate_campaign_object():
-        """Generate a STIX campaign object"""
+        """Generate a STIX campaign object using database-driven campaigns"""
+        from models import Campaign
+        
         campaign_id = f"campaign--{uuid.uuid4()}"
         timestamp = STIXGenerator.generate_timestamp()
         
-        campaign_names = [
-            "Operation ShadowNet", "DarkWeb Harvest", "Silent Storm",
-            "Digital Phantom", "Cyber Eclipse", "Ghost Protocol",
-            "Binary Assault", "Code Red Initiative", "Stealth Vector",
-            "Quantum Breach"
-        ]
+        # Get random campaign from database (100 diverse campaigns)
+        campaign = Campaign.get_random_active()
         
-        campaign_name = random.choice(campaign_names)
-        
-        return {
-            "type": "campaign",
-            "spec_version": "2.1",
-            "id": campaign_id,
-            "created": timestamp,
-            "modified": timestamp,
-            "name": campaign_name,
-            "description": STIXGenerator.add_disclaimer("Sophisticated cyber campaign targeting enterprise infrastructure with advanced persistent threats"),
-            "first_seen": timestamp,
-            "last_seen": timestamp
-        }
+        if campaign:
+            campaign_name = campaign.name
+            campaign_description = campaign.description
+            
+            # Enhanced STIX campaign with comprehensive metadata
+            stix_campaign = {
+                "type": "campaign",
+                "spec_version": "2.1",
+                "id": campaign_id,
+                "created": timestamp,
+                "modified": timestamp,
+                "name": campaign_name,
+                "description": STIXGenerator.add_disclaimer(campaign_description),
+                "first_seen": timestamp,
+                "last_seen": timestamp,
+                "labels": [campaign.campaign_type, campaign.sophistication_level],
+            }
+            
+            # Add campaign-specific properties with British English terminology
+            if campaign.target_sectors:
+                stix_campaign["x_target_sectors"] = campaign.target_sectors
+            if campaign.target_regions:
+                stix_campaign["x_target_regions"] = campaign.target_regions
+            if campaign.motivation:
+                stix_campaign["x_motivation"] = campaign.motivation
+            if campaign.duration_category:
+                stix_campaign["x_duration_category"] = campaign.duration_category
+                
+            return stix_campaign
+        else:
+            # Fallback if no campaigns in database
+            return {
+                "type": "campaign",
+                "spec_version": "2.1",
+                "id": campaign_id,
+                "created": timestamp,
+                "modified": timestamp,
+                "name": "Operation Digital Phantom",
+                "description": STIXGenerator.add_disclaimer("Sophisticated cyber campaign targeting enterprise infrastructure with advanced persistent threats"),
+                "first_seen": timestamp,
+                "last_seen": timestamp
+            }
     
     @staticmethod
     def generate_attack_pattern():
@@ -327,78 +390,66 @@ class STIXGenerator:
         attack_pattern_id = f"attack-pattern--{uuid.uuid4()}"
         timestamp = STIXGenerator.generate_timestamp()
         
-        # MITRE ATT&CK techniques (50 authentic techniques)
-        techniques = [
-            {"name": "Spearphishing Attachment", "mitre_id": "T1566.001"},
-            {"name": "PowerShell", "mitre_id": "T1059.001"},
-            {"name": "Registry Run Keys / Startup Folder", "mitre_id": "T1547.001"},
-            {"name": "Process Injection", "mitre_id": "T1055"},
-            {"name": "Credential Dumping", "mitre_id": "T1003"},
-            {"name": "Remote Desktop Protocol", "mitre_id": "T1021.001"},
-            {"name": "Data Encrypted for Impact", "mitre_id": "T1486"},
-            {"name": "Exfiltration Over C2 Channel", "mitre_id": "T1041"},
-            {"name": "Command and Scripting Interpreter", "mitre_id": "T1059"},
-            {"name": "Valid Accounts", "mitre_id": "T1078"},
-            {"name": "Windows Management Instrumentation", "mitre_id": "T1047"},
-            {"name": "Scheduled Task/Job", "mitre_id": "T1053"},
-            {"name": "File and Directory Discovery", "mitre_id": "T1083"},
-            {"name": "System Information Discovery", "mitre_id": "T1082"},
-            {"name": "Network Service Scanning", "mitre_id": "T1046"},
-            {"name": "Lateral Tool Transfer", "mitre_id": "T1570"},
-            {"name": "Archive Collected Data", "mitre_id": "T1560"},
-            {"name": "Ingress Tool Transfer", "mitre_id": "T1105"},
-            {"name": "Application Layer Protocol", "mitre_id": "T1071"},
-            {"name": "Masquerading", "mitre_id": "T1036"},
-            {"name": "Indicator Removal on Host", "mitre_id": "T1070"},
-            {"name": "Disable or Modify Tools", "mitre_id": "T1562.001"},
-            {"name": "LSASS Memory", "mitre_id": "T1003.001"},
-            {"name": "Security Account Manager", "mitre_id": "T1003.002"},
-            {"name": "DCSync", "mitre_id": "T1003.006"},
-            {"name": "LSA Secrets", "mitre_id": "T1003.004"},
-            {"name": "NTDS", "mitre_id": "T1003.003"},
-            {"name": "Cached Domain Credentials", "mitre_id": "T1003.005"},
-            {"name": "Windows Command Shell", "mitre_id": "T1059.003"},
-            {"name": "Visual Basic", "mitre_id": "T1059.005"},
-            {"name": "Python", "mitre_id": "T1059.006"},
-            {"name": "JavaScript", "mitre_id": "T1059.007"},
-            {"name": "Network Sniffing", "mitre_id": "T1040"},
-            {"name": "Account Discovery", "mitre_id": "T1087"},
-            {"name": "Permission Groups Discovery", "mitre_id": "T1069"},
-            {"name": "Remote System Discovery", "mitre_id": "T1018"},
-            {"name": "Network Share Discovery", "mitre_id": "T1135"},
-            {"name": "System Network Configuration Discovery", "mitre_id": "T1016"},
-            {"name": "System Owner/User Discovery", "mitre_id": "T1033"},
-            {"name": "Process Discovery", "mitre_id": "T1057"},
-            {"name": "Software Discovery", "mitre_id": "T1518"},
-            {"name": "System Service Discovery", "mitre_id": "T1007"},
-            {"name": "Query Registry", "mitre_id": "T1012"},
-            {"name": "System Time Discovery", "mitre_id": "T1124"},
-            {"name": "Virtualization/Sandbox Evasion", "mitre_id": "T1497"},
-            {"name": "Obfuscated Files or Information", "mitre_id": "T1027"},
-            {"name": "Deobfuscate/Decode Files or Information", "mitre_id": "T1140"},
-            {"name": "System Binary Proxy Execution", "mitre_id": "T1218"},
-            {"name": "Signed Binary Proxy Execution", "mitre_id": "T1218"},
-            {"name": "DLL Side-Loading", "mitre_id": "T1574.002"}
-        ]
+        # Get a random MITRE technique from database
+        from models import MitreTechnique
+        technique_obj = MitreTechnique.get_random_active()
+        if not technique_obj:
+            # Fallback if no techniques in database (shouldn't happen due to seeding)
+            name = "Unknown Technique"
+            mitre_id = "T0000"
+            description = "Unknown MITRE ATT&CK technique"
+            tactics = ["unknown"]
+            platforms = ["windows"]
+            external_refs = []
+        else:
+            name = technique_obj.name
+            mitre_id = technique_obj.mitre_id
+            description = technique_obj.description or f"MITRE ATT&CK technique {mitre_id}"
+            tactics = technique_obj.tactics or ["unknown"]
+            platforms = technique_obj.platforms or ["windows"]
+            external_refs = technique_obj.external_references or []
         
-        technique = random.choice(techniques)
-        
-        return {
+        # Build enhanced STIX attack pattern object
+        attack_pattern = {
             "type": "attack-pattern",
             "spec_version": "2.1",
             "id": attack_pattern_id,
             "created": timestamp,
             "modified": timestamp,
-            "name": technique["name"],
-            "description": STIXGenerator.add_disclaimer(f"MITRE ATT&CK technique {technique['mitre_id']}"),
-            "external_references": [
+            "name": name,
+            "description": STIXGenerator.add_disclaimer(description),
+            "external_references": external_refs if external_refs else [
                 {
                     "source_name": "mitre-attack",
-                    "external_id": technique["mitre_id"],
-                    "url": f"https://attack.mitre.org/techniques/{technique['mitre_id'].replace('.', '/')}"
+                    "external_id": mitre_id,
+                    "url": f"https://attack.mitre.org/techniques/{mitre_id.replace('.', '/')}"
                 }
             ]
         }
+        
+        # Add enhanced metadata if available from database
+        if technique_obj:
+            if technique_obj.tactics:
+                attack_pattern["kill_chain_phases"] = [
+                    {
+                        "kill_chain_name": "mitre-attack",
+                        "phase_name": tactic
+                    } for tactic in technique_obj.tactics
+                ]
+            
+            if technique_obj.platforms:
+                attack_pattern["x_mitre_platforms"] = technique_obj.platforms
+            
+            if technique_obj.data_sources:
+                attack_pattern["x_mitre_data_sources"] = technique_obj.data_sources
+            
+            if technique_obj.detection_methods:
+                attack_pattern["x_mitre_detection"] = technique_obj.detection_methods
+            
+            if technique_obj.mitigation_techniques:
+                attack_pattern["x_mitre_defense_bypassed"] = technique_obj.mitigation_techniques
+        
+        return attack_pattern
     
     @staticmethod
     def generate_note_object(threat_actor_name):
@@ -431,55 +482,90 @@ class STIXGenerator:
 
     @staticmethod
     def generate_report_object(threat_actor_name, campaign_name):
-        """Generate a STIX report object with threat intelligence publication"""
+        """Generate a STIX report object using database-driven report templates"""
+        from models import ReportTemplate
+        
         report_id = f"report--{uuid.uuid4()}"
         timestamp = STIXGenerator.generate_timestamp()
         
-        # Generate realistic threat intelligence report titles with PDF reference URLs
-        report_data = [
-            {
-                "title": f"Threat Intelligence Brief: {threat_actor_name} Campaign Analysis",
-                "url": f"https://simonsigre.com/threat-brief-{threat_actor_name.lower().replace(' ', '-')}-{campaign_name.lower().replace(' ', '-')}.pdf"
-            },
-            {
-                "title": f"IOC Report: {campaign_name} Infrastructure and TTPs",
-                "url": f"https://simonsigre.com/ioc-report-{campaign_name.lower().replace(' ', '-')}.pdf"
-            },
-            {
-                "title": f"Attribution Analysis: {threat_actor_name} Operational Security Assessment",
-                "url": f"https://simonsigre.com/attribution-{threat_actor_name.lower().replace(' ', '-')}.pdf"
-            },
-            {
-                "title": f"Threat Actor Profile: {threat_actor_name} Capabilities and Targeting",
-                "url": f"https://simonsigre.com/profile-{threat_actor_name.lower().replace(' ', '-')}.pdf"
-            },
-            {
-                "title": f"Campaign Intelligence: {campaign_name} Technical Indicators and Mitigation",
-                "url": f"https://simonsigre.com/campaign-intel-{campaign_name.lower().replace(' ', '-')}.pdf"
+        # Get random report template from database (50 diverse templates)
+        template = ReportTemplate.get_random_active()
+        
+        if template:
+            # Create slug versions for URL generation
+            threat_actor_slug = threat_actor_name.lower().replace(' ', '-')
+            campaign_slug = campaign_name.lower().replace(' ', '-')
+            
+            # Generate title and description using template placeholders
+            report_title = template.title_format.format(
+                threat_actor_name=threat_actor_name,
+                campaign_name=campaign_name,
+                threat_actor_slug=threat_actor_slug,
+                campaign_slug=campaign_slug
+            )
+            
+            report_description = template.description_format.format(
+                threat_actor_name=threat_actor_name,
+                campaign_name=campaign_name,
+                threat_actor_slug=threat_actor_slug,
+                campaign_slug=campaign_slug
+            )
+            
+            # Generate URL using template pattern
+            report_url = template.url_pattern.format(
+                threat_actor_name=threat_actor_name,
+                campaign_name=campaign_name,
+                threat_actor_slug=threat_actor_slug,
+                campaign_slug=campaign_slug
+            ) if template.url_pattern else f"https://simonsigre.com/report-{campaign_slug}.pdf"
+            
+            # Enhanced report labels based on template metadata
+            report_labels = ["threat-report", template.report_type, template.report_category]
+            
+            stix_report = {
+                "type": "report",
+                "spec_version": "2.1",
+                "id": report_id,
+                "created": timestamp,
+                "modified": timestamp,
+                "name": report_title,
+                "description": STIXGenerator.add_disclaimer(f"{report_description} Full report available at: {report_url}"),
+                "published": timestamp,
+                "labels": report_labels,
+                "x_report_category": template.report_category,
+                "x_target_audience": template.target_audience,
+                "external_references": [
+                    {
+                        "source_name": "simonsigre",
+                        "description": "Threat Intelligence Publication",
+                        "url": report_url
+                    }
+                ],
+                "object_refs": []  # Will be populated with related object references
             }
-        ]
-        
-        selected_report = random.choice(report_data)
-        
-        return {
-            "type": "report",
-            "spec_version": "2.1",
-            "id": report_id,
-            "created": timestamp,
-            "modified": timestamp,
-            "name": selected_report["title"],
-            "description": STIXGenerator.add_disclaimer(f"Comprehensive threat intelligence report analysing {threat_actor_name} activities and associated {campaign_name} infrastructure indicators. Full report available at: {selected_report['url']}"),
-            "published": timestamp,
-            "labels": ["threat-report"],
-            "external_references": [
-                {
-                    "source_name": "simonsigre",
-                    "description": "Threat Intelligence Publication",
-                    "url": selected_report["url"]
-                }
-            ],
-            "object_refs": []  # Will be populated with related object references
-        }
+            
+            return stix_report
+        else:
+            # Fallback if no templates in database
+            return {
+                "type": "report",
+                "spec_version": "2.1",
+                "id": report_id,
+                "created": timestamp,
+                "modified": timestamp,
+                "name": f"Threat Intelligence Brief: {threat_actor_name} Campaign Analysis",
+                "description": STIXGenerator.add_disclaimer(f"Comprehensive threat intelligence report analysing {threat_actor_name} activities and associated {campaign_name} infrastructure indicators."),
+                "published": timestamp,
+                "labels": ["threat-report"],
+                "external_references": [
+                    {
+                        "source_name": "simonsigre",
+                        "description": "Threat Intelligence Publication",
+                        "url": f"https://simonsigre.com/threat-brief-{threat_actor_name.lower().replace(' ', '-')}-{campaign_name.lower().replace(' ', '-')}.pdf"
+                    }
+                ],
+                "object_refs": []
+            }
 
     @staticmethod
     def generate_related_indicators_bundle(count=30):

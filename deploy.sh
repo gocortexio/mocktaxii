@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# MockTAXII v0.5.1 Docker Deployment Script
+# MockTAXII v0.6.0 Docker Deployment Script
 # Usage: ./deploy.sh [start|stop|restart|logs|status|backup|restore]
 
 set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.5.1"
+PROJECT_VERSION="0.6.0"
 COMPOSE_FILE="docker-compose.yml"
 BACKUP_DIR="./backups"
 
