@@ -1,4 +1,4 @@
-# MockTAXII v0.5.1 - Production Docker Compose Configuration
+# MockTAXII v0.6.0 - Production Docker Compose Configuration
 # Advanced production setup with security, monitoring, and SSL
 
 services:

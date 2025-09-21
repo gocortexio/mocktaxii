@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# MockTAXII v0.5.1 Production Deployment Script
+# MockTAXII v0.6.0 Production Deployment Script
 # Advanced deployment with SSL, monitoring, and security hardening
 
 set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.5.1"
+PROJECT_VERSION="0.6.0"
 DOMAIN="${DOMAIN:-localhost}"
 EMAIL="${LETSENCRYPT_EMAIL:-admin@example.com}"
 ENVIRONMENT="${ENVIRONMENT:-production}"

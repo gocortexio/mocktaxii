@@ -4,6 +4,7 @@ from flask import request, jsonify, abort
 from functools import wraps
 from models import ApiKey, RequestLog, ServerStats, db
 from stix_generator import STIXGenerator
+from version import __version__
 
 class TAXIIServer:
     """TAXII 2.x server implementation"""
@@ -59,7 +60,7 @@ class TAXIIServer:
     def get_discovery_response():
         """TAXII Discovery endpoint response"""
         return {
-            "title": "MockTAXII v0.5.1",
+            "title": f"MockTAXII v{__version__}",
             "description": "A lightweight TAXII 2.x server for XSIAM demonstrations",
             "contact": "demo@mocktaxii.local",
             "default": f"/taxii2/{TAXIIServer.API_ROOT}/",
@@ -72,7 +73,7 @@ class TAXIIServer:
     def get_api_root_response():
         """TAXII API Root endpoint response"""
         return {
-            "title": "MockTAXII v0.5.1 API Root",
+            "title": f"MockTAXII v{__version__} API Root",
             "description": "Demo threat intelligence data for XSIAM testing",
             "versions": ["application/taxii+json;version=2.1"],
             "max_content_length": 10485760  # 10MB

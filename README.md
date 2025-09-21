@@ -1,44 +1,54 @@
 
-# MockTAXII v0.5.2
+<div align="center">
 
-A comprehensive TAXII 2.x server designed for testing XSIAM and XSOAR Threat Intelligence Management (TIM). MockTAXII offers a complete STIX/TAXII 2.1 implementation with database-driven mock threat intelligence, generating realistic test indicators, campaigns and reports with rich, interlinked relationships. Each poll produces fresh datasets to simulate real-world threat intelligence services for demonstration and testing purposes.
+![MockTAXII Logo](static/mocktaxii-logo.png)
 
-------------------------------
-## IMPORTANT INFORMATION
+# MockTAXII v0.6.0
 
-**GIT REPO**: https://github.com/gocortexio/mocktaxii/  
-**REQUIREMENTS**: docker, docker-compose  
-**ACCESS**: http://localhost:5001
+[![TAXII 2.1](https://img.shields.io/badge/TAXII-2.1-blue.svg)](https://oasis-open.github.io/cti-documentation/)
+[![STIX 2.1](https://img.shields.io/badge/STIX-2.1-green.svg)](https://oasis-open.github.io/cti-documentation/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-------------------------------
+A comprehensive TAXII 2.x server designed for testing XSIAM and XSOAR Threat Intelligence Management (TIM). MockTAXII offers a complete STIX/TAXII 2.1 implementation with database-driven mock threat intelligence, generating realistic test indicators at enterprise scale from authentic threat subnet data. Features comprehensive campaigns and reports with rich, interlinked relationships. Each poll produces fresh datasets to simulate real-world threat intelligence services for demonstration and testing purposes.
+
+</div>
+
+## Quick Start
+
+| Repository | Requirements | Access |
+|------------|-------------|--------|
+| [GitHub Repository](https://github.com/gocortexio/mocktaxii/) | `docker`, `docker-compose` | http://localhost:5001 |
+
 ## Key Features
 
-**🎯 Production-Ready TAXII 2.x Server**
+### Production-Ready TAXII 2.x Server
 - Complete STIX/TAXII 2.1 compliance with proper content-type headers
 - Enterprise-grade authentication system with API key management
 - Advanced rate limiting and security controls
 - Real-time request logging and comprehensive analytics
 - Docker deployment with PostgreSQL backend
 
-**📊 Comprehensive Threat Intelligence Database**
-- **1,790 realistic mock threat indicators** for testing and demonstration:
-  - 260 malicious IP addresses with geolocation data
+### Comprehensive Threat Intelligence Database
+- **50,000+ realistic mock threat indicators** for testing and demonstration:
+  - 50,000+ malicious IP addresses with authentic geographic attribution and threat categorisation
   - 103 malicious domains with categorisation (phishing, malware, C2, infrastructure)
   - 39 malicious file hashes with malware family associations
   - **1,388 CVE vulnerabilities** from CISA KEV catalogue with generated CVSS 3.1 scores
 - **50+ MITRE ATT&CK technique mappings** for comprehensive threat context
-- Dynamic generation ensures fresh indicators on each poll
+- **100 diverse campaign scenarios** with comprehensive British English metadata across 8 categories
+- **50 report templates** covering intelligence briefs, technical analysis, and sector-specific assessments
+- Dynamic generation from authentic Spamhaus DROP threat subnets ensures fresh indicators on each poll
 
-**🔒 Security & Compliance**
+### Security and Compliance
 - CSRF protection and comprehensive security headers
 - IP-based rate limiting with configurable thresholds
 - Proxy-aware IP detection for accurate client identification
 - SSL/TLS support with Let's Encrypt integration
 
-------------------------------
-## Quick Start
+## Installation
 
-### 1 - Docker Deployment (Recommended)
+### Docker Deployment (Recommended)
 
 ```bash
 # Clone and start
@@ -49,14 +59,13 @@ docker-compose up -d
 # Access at http://localhost:5001
 ```
 
-
-### 2 - Deployment Script
+### Deployment Script
 
 ```bash
 ./deploy.sh start
 ```
 
-### 3 - Manual Deployment
+### Manual Deployment
 
 ```bash
 # Install dependencies with UV
@@ -71,8 +80,7 @@ export SESSION_SECRET="your-secret-key"
 uv run gunicorn --bind 0.0.0.0:5000 main:app
 ```
 
-------------------------------
-## Configuration / Create API Key
+## Configuration
 
 ### Admin Access
 
@@ -84,49 +92,40 @@ The system generates a random admin password on startup. Check the console logs 
 
 Browse to: http://localhost:5001 and use this password to access the API key management interface at `/login`.
 
-**Getting Docker Logs:**
-- Desktop Docker: Click on web tier host
-- Ubuntu Docker: `sudo docker logs <containerid> | grep Password`
+**Retrieving Docker Logs:**
+- Docker Desktop: Select the web container from the interface
+- Ubuntu Docker: `sudo docker logs <container-id> | grep Password`
 
-------------------------------
 ## XSOAR/XSIAM Integration
 
-Integration: TAXII 2 Feed (https://cortex.marketplace.pan.dev/marketplace/details/FeedTAXII/)
+**Integration:** [TAXII 2 Feed](https://cortex.marketplace.pan.dev/marketplace/details/FeedTAXII/)
 
-Configure XSOAR/XSIAM TAXII feeds with:
+### Configuration Settings
 
-- **Fetches Indicators**: yes
-- **Source Reliability**: 'B - Usually reliable' (note: client can choose whatever they wish)
-- **Discovery Service URL**: http://<ipaddress>:5001/taxii2/
-- **Username / API key**: _header:Authorization
-- **Password**: Your API key
-- **STIX Objects to Fetch**: 'remove all'
+| Setting | Value |
+|---------|-------|
+| **Fetches Indicators** | `yes` |
+| **Source Reliability** | `B - Usually reliable` |
+| **Discovery Service URL** | `http://<ipaddress>:5001/taxii2/` |
+| **Username / API key** | `_header:Authorization` |
+| **Password** | Your API key |
+| **STIX Objects to Fetch** | `remove all` |
 
-Then:
+### Setup Steps
 1. Save integration
 2. Test integration
 3. If successful, click 'Re-fetch indicators from this instance' or wait for initial fetch to occur
 
-------------------------------
 
-## Support
-
-For issues with XSIAM or XSOAR integration, verify:
-
-- API key is active in the management interface
-- Correct authentication headers are used
-- Collection name matches `threat-intel-demo`
-
-
-------------------------------
-## Other Information
-
+## API Reference
 
 ### TAXII Endpoints
 
-- **Discovery**: `/taxii2/`
-- **Collections**: `/taxii2/api/collections/`
-- **Objects**: `/taxii2/api/collections/threat-intel-demo/objects/`
+| Endpoint | Description |
+|----------|-------------|
+| `/taxii2/` | Discovery |
+| `/taxii2/api/collections/` | Collections |
+| `/taxii2/api/collections/threat-intel-demo/objects/` | Objects |
 
 ### Authentication
 All TAXII endpoints require API key authentication:
@@ -135,7 +134,9 @@ curl -H "Authorization: Bearer YOUR_API_KEY" \
      http://localhost:5001/taxii2/collections/threat-intel-demo/objects/
 ```
 
-## Environment Variables
+## Environment & Limits
+
+### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -144,14 +145,20 @@ curl -H "Authorization: Bearer YOUR_API_KEY" \
 | `WTF_CSRF_ENABLED` | Enable CSRF protection | `true` |
 | `FLASK_ENV` | Flask environment | `production` |
 
-## Rate Limits
+### Rate Limits
 
-- **General API**: 1000 requests/day, 200/hour
-- **TAXII Endpoints**: 300 requests/minute
-- **Statistics**: 60 requests/minute
+| Endpoint | Limit |
+|----------|-------|
+| **General API** | 1000 requests/day, 200/hour |
+| **TAXII Endpoints** | 300 requests/minute |
+| **Statistics** | 60 requests/minute |
 
+## Troubleshooting
 
-------------------------------
+**For issues with XSIAM or XSOAR integration, verify:**
+- API key is active in the management interface
+- Correct authentication headers are used
+- Collection name matches `threat-intel-demo`
 
 ## Production Notes
 
@@ -162,7 +169,8 @@ curl -H "Authorization: Bearer YOUR_API_KEY" \
 
 ---
 
-**Version**: 0.5.2  
-**License**: MIT  
-**Compatibility**: TAXII 2.1, STIX 2.1  
-**Database**: PostgreSQL 15+ required
+<div align="center">
+
+**Version**: 0.6.0 • **License**: MIT • **Compatibility**: TAXII 2.1, STIX 2.1 • **Database**: PostgreSQL 15+
+
+</div>
