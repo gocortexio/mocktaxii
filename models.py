@@ -10,6 +10,7 @@ class ApiKey(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     request_count = db.Column(db.Integer, nullable=False, default=0)
+    requests_since_bundle = db.Column(db.Integer, nullable=False, default=0)
     
     def __repr__(self):
         return f'<ApiKey {self.name}>'
@@ -23,6 +24,8 @@ class RequestLog(db.Model):
     ip_address = db.Column(db.String(45))
     user_agent = db.Column(db.Text)
     indicators_served = db.Column(db.Integer, default=0)
+    custom_bundle_served = db.Column(db.Boolean, default=False)
+    custom_bundle_id = db.Column(db.Integer, db.ForeignKey('custom_bundles.id'), nullable=True)
     
     api_key = db.relationship('ApiKey', backref=db.backref('requests', lazy=True))
     
@@ -56,7 +59,7 @@ class ThreatActor(db.Model):
     description = db.Column(db.Text)
     threat_actor_types = db.Column(db.JSON, default=lambda: ["criminal-enterprise"])
     sophistication = db.Column(db.String(50), default="intermediate")
-    resource_level = db.Column(db.String(50), default="organisation")
+    resource_level = db.Column(db.String(50), default="organization")
     primary_motivation = db.Column(db.String(50), default="financial-gain")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -137,10 +140,10 @@ class MaliciousIP(db.Model):
         if cls.query.count() == 0:
             # Use subnet-based generation instead of hardcoded list
             print("No IPs found. Using subnet-based generation...")
-            cls.seed_from_subnets(target_count=50000)
+            cls.seed_from_subnets(target_count=5000)
     
     @classmethod
-    def seed_from_subnets(cls, target_count=50000):
+    def seed_from_subnets(cls, target_count=5000):
         """Generate large number of IP addresses from threat subnets"""
         current_count = cls.query.count()
         if current_count < target_count:  # Only generate if we don't have enough IPs
@@ -764,7 +767,7 @@ class MaliciousDomain(db.Model):
             
             import random
             for domain_name in default_domains:
-                # Categorize domains based on patterns
+                # Categorise domains based on patterns
                 if any(keyword in domain_name for keyword in ['phish', 'fake', 'credential', 'fraud']):
                     category = 'phishing'
                 elif any(keyword in domain_name for keyword in ['malware', 'trojan', 'virus', 'ransomware']):
@@ -911,6 +914,132 @@ class MaliciousHash(db.Model):
                 db.session.add(malicious_hash)
             
             db.session.commit()
+
+
+class MaliciousSoftware(db.Model):
+    """Database model for malicious software packages (PyPI, npm, etc.)"""
+    __tablename__ = 'malicious_software'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    package_name = db.Column(db.String(255), nullable=False, unique=True, index=True)
+    version = db.Column(db.String(50), nullable=False)
+    cpe = db.Column(db.String(255))
+    vendor = db.Column(db.String(50), nullable=False, default="pypi")
+    artifact_hash = db.Column(db.String(64), nullable=False)
+    download_url = db.Column(db.String(512), nullable=False)
+    description = db.Column(db.Text)
+    malware_type = db.Column(db.String(100), nullable=False)
+    threat_types = db.Column(db.JSON, default=lambda: ["malicious-activity"])
+    confidence_score = db.Column(db.Integer, default=85, index=True)
+    source = db.Column(db.String(255), default="MockTAXII PyGremlinBox Feed")
+    is_typosquat = db.Column(db.Boolean, nullable=False, default=False)
+    campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=True)
+    first_seen = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    campaign = db.relationship('Campaign', backref=db.backref('malicious_software', lazy='dynamic'))
+    
+    def __repr__(self):
+        return f'<MaliciousSoftware {self.package_name}@{self.version}>'
+    
+    @classmethod
+    def get_random_active(cls):
+        """Get a random active malicious software package"""
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).first()
+    
+    @classmethod
+    def seed_malicious_software(cls):
+        """Seed the database with malicious PyPI packages"""
+        if cls.query.count() == 0:
+            import random
+            import hashlib
+            
+            scary_suffixes = [
+                "keylogger", "backdoor", "stealer", "cryptominer", "rootkit",
+                "ransomware", "dropper", "loader", "injector", "exfiltrator",
+                "harvester", "sniffer", "grabber", "clipper", "botnet",
+                "wiper", "rat", "spyware", "trojan", "worm",
+                "shellcode", "exploit", "payload", "beacon", "implant",
+                "c2agent", "reverseShell", "portscanner", "credDumper", "tokenThief",
+                "cookieStealer", "browserHijack", "dnsPoison", "arpSpoof", "sslStrip",
+                "mitm", "keysniff", "screenGrab", "webcamSpy", "microphoneTap",
+                "fileEncrypt", "diskWipe", "mbr-overwrite", "bootkit", "hypervisor",
+                "sandbox-escape", "av-killer", "edr-bypass", "amsi-patch", "etw-blind"
+            ]
+            
+            malware_types = [
+                "backdoor", "credential-stealer", "cryptominer", "dropper",
+                "keylogger", "ransomware", "remote-access-trojan", "rootkit",
+                "spyware", "trojan", "worm", "info-stealer", "banking-trojan",
+                "adware", "botnet-agent", "command-and-control"
+            ]
+            
+            description_templates = [
+                "Malicious PyPI package {name} identified as {malware_type} targeting Python developers",
+                "Supply chain attack package {name} containing {malware_type} payload",
+                "Typosquatted package {name} distributing {malware_type} to unsuspecting users",
+                "Backdoored Python package {name} with embedded {malware_type} functionality",
+                "Compromised package {name} serving as {malware_type} distribution vector",
+                "Malicious dependency {name} injecting {malware_type} into build pipelines",
+                "PyPI package {name} weaponised with {malware_type} capabilities",
+                "Software supply chain threat {name} deploying {malware_type} on installation"
+            ]
+            
+            from models import Campaign
+            campaigns = Campaign.query.all()
+            
+            print(f"Seeding {len(scary_suffixes)} malicious software packages...")
+            
+            for suffix in scary_suffixes:
+                package_name = f"pygremlinbox-malware-{suffix}"
+                major = random.randint(0, 3)
+                minor = random.randint(0, 15)
+                patch = random.randint(0, 99)
+                version = f"{major}.{minor}.{patch}"
+                
+                cpe = f"cpe:2.3:a:pypi:{package_name}:{version}:*:*:*:*:python:*:*"
+                
+                artifact_content = f"{package_name}-{version}-py3-none-any.whl"
+                artifact_hash = hashlib.sha256(artifact_content.encode()).hexdigest().upper()
+                
+                download_url = f"http://pygremlinbox.gocortex.io/mocktaxii/{package_name}"
+                
+                malware_type = random.choice(malware_types)
+                
+                description = random.choice(description_templates).format(
+                    name=package_name,
+                    malware_type=malware_type
+                )
+                
+                campaign = random.choice(campaigns) if campaigns else None
+                
+                is_typosquat = random.random() < 0.3
+                
+                confidence = random.choices([90, 85, 75], weights=[40, 40, 20])[0]
+                
+                software = cls(
+                    package_name=package_name,
+                    version=version,
+                    cpe=cpe,
+                    vendor="pypi",
+                    artifact_hash=artifact_hash,
+                    download_url=download_url,
+                    description=description,
+                    malware_type=malware_type,
+                    threat_types=["malicious-activity", "supply-chain-compromise"],
+                    confidence_score=confidence,
+                    is_typosquat=is_typosquat,
+                    campaign_id=campaign.id if campaign else None,
+                    source="MockTAXII PyGremlinBox Feed"
+                )
+                db.session.add(software)
+            
+            db.session.commit()
+            print(f"Successfully seeded {cls.query.count()} malicious software packages")
 
 
 class MalwareFamily(db.Model):
@@ -1360,7 +1489,7 @@ class MalwareFamily(db.Model):
                 {
                     "name": "Ragnar Locker",
                     "mitre_id": "S0481",
-                    "description": "Ragnar Locker is ransomware that has been used against multiple organizations.",
+                    "description": "Ragnar Locker is ransomware that has been used against multiple organisations.",
                     "malware_types": ["ransomware"],
                     "platforms": ["windows"],
                     "capabilities": ["data-encryption", "data-exfiltration"]
@@ -1376,7 +1505,7 @@ class MalwareFamily(db.Model):
                 {
                     "name": "Ryuk",
                     "mitre_id": "S0446",
-                    "description": "Ryuk is ransomware that has been used for targeted attacks against high-value organizations.",
+                    "description": "Ryuk is ransomware that has been used for targeted attacks against high-value organisations.",
                     "malware_types": ["ransomware"],
                     "platforms": ["windows"],
                     "capabilities": ["data-encryption", "targeted-attacks"]
@@ -3674,3 +3803,343 @@ class ReportTemplate(db.Model):
             
             db.session.commit()
             print(f"Successfully seeded {cls.query.count()} comprehensive report templates from threat intelligence database")
+
+
+class NoteTemplate(db.Model):
+    """Database model for threat intelligence note templates"""
+    __tablename__ = 'note_templates'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    template_name = db.Column(db.String(255), nullable=False)
+    content_format = db.Column(db.Text, nullable=False)  # Template with placeholders like {threat_actor_name}
+    url_pattern = db.Column(db.String(500))  # URL template with placeholders
+    
+    # Categorisation
+    note_type = db.Column(db.String(50), default="intelligence-report")  # intelligence-report, infrastructure-analysis, etc.
+    target_sector = db.Column(db.String(50), default="general")  # financial, healthcare, government, etc.
+    
+    # Management fields
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    def __repr__(self):
+        return f'<NoteTemplate {self.template_name}>'
+    
+    @classmethod
+    def get_random_active(cls):
+        """Get a random active note template"""
+        templates = cls.query.filter_by(is_active=True).all()
+        if templates:
+            import random
+            return random.choice(templates)
+        return None
+    
+    @classmethod
+    def seed_note_templates(cls):
+        """Seed the database with comprehensive note templates if none exist"""
+        if cls.query.count() == 0:
+            print("Seeding comprehensive note template database...")
+            
+            # 25 diverse intelligence note templates
+            templates_data = [
+                # Intelligence Reports (5 templates)
+                {
+                    "template_name": "Financial Sector Intelligence",
+                    "content_format": "Intelligence report on {threat_actor_name} activities observed targeting financial institutions with credential harvesting campaigns. Analysis indicates sophisticated social engineering tactics combined with custom malware deployment. Full analysis available at: https://simonsigre.com/threat-actor-analysis-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/threat-actor-analysis-{threat_actor_slug}.pdf",
+                    "note_type": "intelligence-report",
+                    "target_sector": "financial"
+                },
+                {
+                    "template_name": "Government Targeting Intelligence",
+                    "content_format": "Intelligence assessment indicates {threat_actor_name} has expanded operations to target government agencies with spear-phishing campaigns. Observed infrastructure overlaps with previously documented state-sponsored activities. Detailed briefing: https://simonsigre.com/government-targeting-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/government-targeting-{threat_actor_slug}.pdf",
+                    "note_type": "intelligence-report",
+                    "target_sector": "government"
+                },
+                {
+                    "template_name": "Healthcare Sector Alert",
+                    "content_format": "Recent campaign attribution links {threat_actor_name} to advanced persistent threat activities in healthcare sector. Evidence suggests targeting of patient data and medical research facilities. Report: https://simonsigre.com/healthcare-threats-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/healthcare-threats-{threat_actor_slug}.pdf",
+                    "note_type": "intelligence-report",
+                    "target_sector": "healthcare"
+                },
+                {
+                    "template_name": "Critical Infrastructure Warning",
+                    "content_format": "Threat intelligence indicates {threat_actor_name} reconnaissance activities targeting critical infrastructure operators. Industrial control system vulnerabilities identified as primary attack vectors. Assessment: https://simonsigre.com/critical-infrastructure-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/critical-infrastructure-{threat_actor_slug}.pdf",
+                    "note_type": "intelligence-report",
+                    "target_sector": "critical-infrastructure"
+                },
+                {
+                    "template_name": "Technology Sector Intelligence",
+                    "content_format": "Intelligence report on {threat_actor_name} supply chain compromise attempts targeting technology companies. Software development environments and source code repositories identified as primary objectives. Analysis: https://simonsigre.com/tech-sector-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/tech-sector-{threat_actor_slug}.pdf",
+                    "note_type": "intelligence-report",
+                    "target_sector": "technology"
+                },
+                
+                # Infrastructure Analysis (5 templates)
+                {
+                    "template_name": "C2 Infrastructure Analysis",
+                    "content_format": "Analysis of {threat_actor_name} infrastructure reveals use of compromised domains for command and control operations. Network indicators suggest distributed hosting across multiple geographic regions. Technical details: https://simonsigre.com/infrastructure-analysis-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/infrastructure-analysis-{threat_actor_slug}.pdf",
+                    "note_type": "infrastructure-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Domain Infrastructure Mapping",
+                    "content_format": "Infrastructure investigation reveals {threat_actor_name} utilises fast-flux DNS techniques and bulletproof hosting providers. Domain registration patterns indicate operational security awareness. Mapping report: https://simonsigre.com/domain-mapping-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/domain-mapping-{threat_actor_slug}.pdf",
+                    "note_type": "infrastructure-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Hosting Provider Analysis",
+                    "content_format": "Analysis indicates {threat_actor_name} maintains redundant infrastructure across multiple hosting providers with automated failover capabilities. Geographic distribution suggests intent to evade takedown efforts. Details: https://simonsigre.com/hosting-analysis-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/hosting-analysis-{threat_actor_slug}.pdf",
+                    "note_type": "infrastructure-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "SSL Certificate Intelligence",
+                    "content_format": "Certificate transparency analysis reveals {threat_actor_name} operational patterns through SSL certificate registration. Temporal analysis indicates coordinated infrastructure deployment. Research: https://simonsigre.com/certificate-intel-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/certificate-intel-{threat_actor_slug}.pdf",
+                    "note_type": "infrastructure-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Network Traffic Analysis",
+                    "content_format": "Network analysis of {threat_actor_name} communication patterns reveals encrypted channels using custom protocols. Beaconing intervals and data exfiltration volumes documented. Technical report: https://simonsigre.com/network-analysis-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/network-analysis-{threat_actor_slug}.pdf",
+                    "note_type": "infrastructure-analysis",
+                    "target_sector": "general"
+                },
+                
+                # Technical Analysis (5 templates)
+                {
+                    "template_name": "Living-off-the-Land Analysis",
+                    "content_format": "Technical analysis indicates {threat_actor_name} employs living-off-the-land techniques to evade detection. PowerShell, WMI, and native Windows utilities observed as primary execution methods. Methodology: https://simonsigre.com/lotl-techniques-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/lotl-techniques-{threat_actor_slug}.pdf",
+                    "note_type": "technical-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Malware Technical Analysis",
+                    "content_format": "Technical reverse engineering of {threat_actor_name} malware reveals sophisticated anti-analysis techniques including virtualisation detection and debugger evasion. Binary analysis: https://simonsigre.com/malware-analysis-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/malware-analysis-{threat_actor_slug}.pdf",
+                    "note_type": "technical-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Exploit Chain Analysis",
+                    "content_format": "Analysis of {threat_actor_name} exploitation techniques reveals chained vulnerabilities for privilege escalation. Initial access through browser exploits followed by kernel-level persistence. Technical brief: https://simonsigre.com/exploit-chain-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/exploit-chain-{threat_actor_slug}.pdf",
+                    "note_type": "technical-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Persistence Mechanism Analysis",
+                    "content_format": "Technical investigation reveals {threat_actor_name} employs multiple persistence mechanisms including registry modifications, scheduled tasks, and WMI subscriptions. Detection guidance: https://simonsigre.com/persistence-analysis-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/persistence-analysis-{threat_actor_slug}.pdf",
+                    "note_type": "technical-analysis",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Lateral Movement Techniques",
+                    "content_format": "Analysis documents {threat_actor_name} lateral movement patterns using credential dumping and pass-the-hash techniques. RDP tunnelling and SMB exploitation observed. Methodology report: https://simonsigre.com/lateral-movement-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/lateral-movement-{threat_actor_slug}.pdf",
+                    "note_type": "technical-analysis",
+                    "target_sector": "general"
+                },
+                
+                # Threat Hunting (5 templates)
+                {
+                    "template_name": "Infrastructure Overlap Investigation",
+                    "content_format": "Threat hunting investigation reveals {threat_actor_name} infrastructure overlaps with previously observed campaigns. Shared hosting, registration patterns, and SSL certificates indicate common operational control. Research: https://simonsigre.com/threat-hunting-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/threat-hunting-{threat_actor_slug}.pdf",
+                    "note_type": "threat-hunting",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Behavioural Pattern Analysis",
+                    "content_format": "Threat hunting analysis of {threat_actor_name} operational patterns reveals consistent working hours suggesting specific geographic origin. Temporal analysis indicates organised operational tempo. Findings: https://simonsigre.com/behavioural-analysis-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/behavioural-analysis-{threat_actor_slug}.pdf",
+                    "note_type": "threat-hunting",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "YARA Rule Development",
+                    "content_format": "Threat hunting efforts targeting {threat_actor_name} have produced validated YARA signatures for malware detection. Signatures cover multiple malware variants and packers. Detection package: https://simonsigre.com/yara-rules-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/yara-rules-{threat_actor_slug}.pdf",
+                    "note_type": "threat-hunting",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Sigma Rule Development",
+                    "content_format": "Threat hunting investigation of {threat_actor_name} TTPs has produced Sigma detection rules for SIEM integration. Rules cover initial access through data exfiltration stages. Detection package: https://simonsigre.com/sigma-rules-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/sigma-rules-{threat_actor_slug}.pdf",
+                    "note_type": "threat-hunting",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "IOC Enrichment Analysis",
+                    "content_format": "Threat hunting enrichment of {threat_actor_name} indicators reveals additional infrastructure not previously documented. Passive DNS and certificate transparency data expanded known footprint. Enrichment report: https://simonsigre.com/ioc-enrichment-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/ioc-enrichment-{threat_actor_slug}.pdf",
+                    "note_type": "threat-hunting",
+                    "target_sector": "general"
+                },
+                
+                # Campaign Attribution (5 templates)
+                {
+                    "template_name": "Campaign Attribution Assessment",
+                    "content_format": "Attribution assessment links {threat_actor_name} to recent campaign targeting multinational corporations. TTP analysis and infrastructure correlation provide high-confidence attribution. Assessment: https://simonsigre.com/attribution-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/attribution-{threat_actor_slug}.pdf",
+                    "note_type": "campaign-attribution",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Historical Campaign Linkage",
+                    "content_format": "Historical analysis reveals {threat_actor_name} connection to previously unattributed campaigns dating back multiple years. Code reuse and infrastructure patterns confirm operational continuity. Historical brief: https://simonsigre.com/historical-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/historical-{threat_actor_slug}.pdf",
+                    "note_type": "campaign-attribution",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Victimology Analysis",
+                    "content_format": "Victimology assessment of {threat_actor_name} campaigns reveals systematic targeting of specific industry verticals. Geographic and sector distribution indicates strategic objectives. Analysis: https://simonsigre.com/victimology-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/victimology-{threat_actor_slug}.pdf",
+                    "note_type": "campaign-attribution",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "TTP Evolution Tracking",
+                    "content_format": "Longitudinal analysis tracks {threat_actor_name} TTP evolution across multiple campaigns. Capability development and tooling changes document operational maturation. Evolution report: https://simonsigre.com/ttp-evolution-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/ttp-evolution-{threat_actor_slug}.pdf",
+                    "note_type": "campaign-attribution",
+                    "target_sector": "general"
+                },
+                {
+                    "template_name": "Cross-Campaign Correlation",
+                    "content_format": "Cross-campaign correlation analysis identifies {threat_actor_name} operational fingerprints across seemingly disparate intrusions. Shared tooling and techniques confirm unified threat actor. Correlation report: https://simonsigre.com/cross-campaign-{threat_actor_slug}.pdf",
+                    "url_pattern": "https://simonsigre.com/cross-campaign-{threat_actor_slug}.pdf",
+                    "note_type": "campaign-attribution",
+                    "target_sector": "general"
+                }
+            ]
+            
+            # Create and add all note templates
+            for template_data in templates_data:
+                template = cls(
+                    template_name=template_data["template_name"],
+                    content_format=template_data["content_format"],
+                    url_pattern=template_data.get("url_pattern", ""),
+                    note_type=template_data.get("note_type", "intelligence-report"),
+                    target_sector=template_data.get("target_sector", "general")
+                )
+                db.session.add(template)
+            
+            db.session.commit()
+            print(f"Successfully seeded {cls.query.count()} comprehensive note templates from threat intelligence database")
+
+
+class CustomBundle(db.Model):
+    """Database model for custom STIX bundles uploaded by administrators"""
+    __tablename__ = 'custom_bundles'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    
+    api_key_id = db.Column(db.Integer, db.ForeignKey('api_key.id'), nullable=True)
+    
+    stix_payload = db.Column(db.Text, nullable=False)
+    
+    frequency = db.Column(db.Integer, nullable=False, default=10)
+    
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    object_count = db.Column(db.Integer, default=0)
+    bundle_size_bytes = db.Column(db.Integer, default=0)
+    times_served = db.Column(db.Integer, nullable=False, default=0)
+    
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_served_at = db.Column(db.DateTime, nullable=True)
+    
+    api_key = db.relationship('ApiKey', backref=db.backref('custom_bundles', lazy=True))
+    
+    def __repr__(self):
+        return f'<CustomBundle {self.name}>'
+    
+    @classmethod
+    def get_bundle_for_api_key(cls, api_key_id):
+        """Get an active custom bundle that applies to this API key.
+        
+        Priority order:
+        1. Bundles targeting this specific API key (api_key_id matches)
+        2. Global bundles (api_key_id is NULL)
+        
+        When multiple bundles have equal priority, the oldest bundle
+        (lowest id) takes precedence for deterministic behaviour.
+        """
+        bundle = cls.query.filter(
+            cls.is_active == True,
+            db.or_(
+                cls.api_key_id == api_key_id,
+                cls.api_key_id == None
+            )
+        ).order_by(
+            cls.api_key_id.desc().nullslast(),
+            cls.id.asc()
+        ).first()
+        return bundle
+    
+    def mark_served(self):
+        """Update bundle statistics when served"""
+        self.times_served += 1
+        self.last_served_at = datetime.now(timezone.utc)
+        db.session.commit()
+    
+    def get_stix_bundle(self):
+        """Return the STIX payload as a Python dict"""
+        import json
+        try:
+            return json.loads(self.stix_payload)
+        except json.JSONDecodeError:
+            return None
+    
+    @classmethod
+    def validate_stix_payload(cls, payload_str, max_size_mb=10):
+        """Validate a STIX payload string and return parsed data with metadata"""
+        import json
+        
+        size_bytes = len(payload_str.encode('utf-8'))
+        max_size_bytes = max_size_mb * 1024 * 1024
+        
+        if size_bytes > max_size_bytes:
+            return None, f"Bundle size ({size_bytes / 1024 / 1024:.2f}MB) exceeds maximum allowed ({max_size_mb}MB)"
+        
+        try:
+            data = json.loads(payload_str)
+        except json.JSONDecodeError as e:
+            return None, f"Invalid JSON: {str(e)}"
+        
+        if not isinstance(data, dict):
+            return None, "STIX bundle must be a JSON object"
+        
+        if data.get('type') != 'bundle':
+            return None, "STIX bundle must have type 'bundle'"
+        
+        objects = data.get('objects', [])
+        if not isinstance(objects, list):
+            return None, "STIX bundle 'objects' must be an array"
+        
+        object_count = len(objects)
+        
+        return {
+            'valid': True,
+            'size_bytes': size_bytes,
+            'object_count': object_count,
+            'data': data
+        }, None

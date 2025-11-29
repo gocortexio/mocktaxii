@@ -1,49 +1,97 @@
 #!/bin/bash
 
-# MockTAXII v0.6.0 Docker Deployment Script
+# MockTAXII v0.7.0 Docker Deployment Script
 # Usage: ./deploy.sh [start|stop|restart|logs|status|backup|restore]
+
+# Ensure script is run with bash, not sh
+if [ -z "$BASH_VERSION" ]; then
+    echo "[ERROR] This script requires bash. Please run with: bash $0 $*" >&2
+    echo "        Or make it executable and run: ./$0 $*" >&2
+    exit 1
+fi
 
 set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.6.0"
+PROJECT_VERSION="0.7.0"
 COMPOSE_FILE="docker-compose.yml"
 BACKUP_DIR="./backups"
 
-# Colors for output
+# IP Count Configuration (from environment or prompt)
+DEFAULT_IP_COUNT=5000
+
+# Colours for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Functions
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    printf "${BLUE}[INFO]${NC} %s\n" "$1"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    printf "${GREEN}[OK]${NC} %s\n" "$1"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    printf "${YELLOW}[WARNING]${NC} %s\n" "$1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    printf "${RED}[ERROR]${NC} %s\n" "$1"
+}
+
+prompt_ip_count() {
+    echo ""
+    log_info "Malicious IP Address Configuration"
+    echo "  Choose the number of IP addresses to generate:"
+    echo ""
+    echo "  [1] 5,000   - Quick demo (fastest startup, ~2 minutes)"
+    echo "  [2] 10,000  - Small testing environment"
+    echo "  [3] 25,000  - Medium deployment"
+    echo "  [4] 50,000  - Production deployment"
+    echo "  [5] 100,000 - Large-scale production (slow startup)"
+    echo "  [6] Custom  - Enter a custom value"
+    echo ""
+    read -p "Select option [1-6] (default: 1): " ip_choice
+    
+    case "${ip_choice:-1}" in
+        1) MALICIOUS_IP_TARGET_COUNT=5000 ;;
+        2) MALICIOUS_IP_TARGET_COUNT=10000 ;;
+        3) MALICIOUS_IP_TARGET_COUNT=25000 ;;
+        4) MALICIOUS_IP_TARGET_COUNT=50000 ;;
+        5) MALICIOUS_IP_TARGET_COUNT=100000 ;;
+        6)
+            read -p "Enter custom IP count (1000-200000): " custom_count
+            if [[ "$custom_count" =~ ^[0-9]+$ ]] && [ "$custom_count" -ge 1000 ] && [ "$custom_count" -le 200000 ]; then
+                MALICIOUS_IP_TARGET_COUNT=$custom_count
+            else
+                log_warning "Invalid value. Using default: 5000"
+                MALICIOUS_IP_TARGET_COUNT=5000
+            fi
+            ;;
+        *)
+            MALICIOUS_IP_TARGET_COUNT=5000
+            ;;
+    esac
+    
+    log_success "IP count set to: ${MALICIOUS_IP_TARGET_COUNT}"
+    export MALICIOUS_IP_TARGET_COUNT
 }
 
 check_dependencies() {
     log_info "Checking dependencies..."
     
-    if ! command -v docker &> /dev/null; then
+    if ! command -v docker >/dev/null 2>&1; then
         log_error "Docker is not installed. Please install Docker first."
         exit 1
     fi
     
-    if ! command -v docker-compose &> /dev/null; then
+    if ! command -v docker-compose >/dev/null 2>&1; then
         log_error "Docker Compose is not installed. Please install Docker Compose first."
         exit 1
     fi
@@ -64,17 +112,31 @@ DATABASE_URL=postgresql://mocktaxii:\${POSTGRES_PASSWORD}@db:5432/mocktaxii
 # Application Configuration
 SESSION_SECRET=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
 
+# Threat Intelligence Configuration
+# IP count: 5000 (demo), 50000+ (production)
+MALICIOUS_IP_TARGET_COUNT=${MALICIOUS_IP_TARGET_COUNT:-5000}
+
 # Security Configuration
 WTF_CSRF_ENABLED=true
 FLASK_ENV=production
 
-# Optional: Change admin password (default: QrmrQQrpdkS4YesJ6AuJ)
+# Optional: Change admin password (default: randomly generated)
 # ADMIN_PASSWORD=your-secure-password-here
+
+# Optional: Skip seeding on restart (set to true after initial setup)
+# SKIP_SEEDING=false
 EOF
         log_success ".env file created with secure random passwords"
-        log_warning "Please review and customize the .env file if needed"
+        log_warning "Please review and customise the .env file if needed"
     else
         log_info ".env file already exists, skipping generation"
+        # Update IP count in existing .env if not present
+        if ! grep -q "MALICIOUS_IP_TARGET_COUNT" .env; then
+            echo "" >> .env
+            echo "# Threat Intelligence Configuration (added by deploy.sh)" >> .env
+            echo "MALICIOUS_IP_TARGET_COUNT=${MALICIOUS_IP_TARGET_COUNT:-5000}" >> .env
+            log_info "Added MALICIOUS_IP_TARGET_COUNT to existing .env"
+        fi
     fi
 }
 
@@ -83,6 +145,11 @@ start_services() {
     
     # Create backup directory
     mkdir -p "$BACKUP_DIR"
+    
+    # Prompt for IP count if not already set
+    if [ -z "$MALICIOUS_IP_TARGET_COUNT" ]; then
+        prompt_ip_count
+    fi
     
     # Generate environment file if it doesn't exist
     generate_env_file
@@ -143,7 +210,7 @@ show_status() {
     echo ""
     
     # Check if web service is responding
-    if curl -s -f http://localhost:5001/api/stats > /dev/null 2>&1; then
+    if curl -s -f http://localhost:5001/api/stats >/dev/null 2>&1; then
         log_success "Web service is responding"
     else
         log_warning "Web service is not responding"

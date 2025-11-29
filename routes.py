@@ -202,6 +202,155 @@ def deactivate_api_key(key_id):
     flash(f'API key "{api_key.name}" has been deactivated', 'info')
     return redirect(url_for('api_keys'))
 
+
+# Custom Bundles Management
+@app.route('/admin/bundles')
+@require_auth
+@limiter.limit("20 per minute")
+def custom_bundles():
+    """Custom STIX bundles management page"""
+    from models import CustomBundle
+    bundles = CustomBundle.query.order_by(CustomBundle.created_at.desc()).all()
+    api_keys_list = ApiKey.query.filter_by(is_active=True).order_by(ApiKey.name).all()
+    return render_template('bundles.html', bundles=bundles, api_keys=api_keys_list)
+
+
+@app.route('/admin/bundles/upload', methods=['POST'])
+@require_auth
+@limiter.limit("10 per minute")
+def upload_bundle():
+    """Upload a new custom STIX bundle"""
+    from models import CustomBundle
+    import json
+    
+    name = request.form.get('name', '').strip()
+    description = request.form.get('description', '').strip()
+    api_key_id = request.form.get('api_key_id', '').strip()
+    frequency = request.form.get('frequency', '10').strip()
+    
+    if not name or len(name) > 100:
+        flash('Bundle name is required and must be under 100 characters', 'error')
+        return redirect(url_for('custom_bundles'))
+    
+    try:
+        frequency = int(frequency)
+        if frequency < 1 or frequency > 1000:
+            raise ValueError("Frequency out of range")
+    except ValueError:
+        flash('Frequency must be a number between 1 and 1000', 'error')
+        return redirect(url_for('custom_bundles'))
+    
+    if 'bundle_file' not in request.files:
+        flash('No file uploaded', 'error')
+        return redirect(url_for('custom_bundles'))
+    
+    file = request.files['bundle_file']
+    if file.filename == '':
+        flash('No file selected', 'error')
+        return redirect(url_for('custom_bundles'))
+    
+    if not file.filename.endswith('.json'):
+        flash('File must be a JSON file', 'error')
+        return redirect(url_for('custom_bundles'))
+    
+    try:
+        payload_str = file.read().decode('utf-8')
+    except UnicodeDecodeError:
+        flash('File must be valid UTF-8 text', 'error')
+        return redirect(url_for('custom_bundles'))
+    
+    result, error = CustomBundle.validate_stix_payload(payload_str)
+    if error:
+        flash(f'Invalid STIX bundle: {error}', 'error')
+        return redirect(url_for('custom_bundles'))
+    
+    bundle = CustomBundle()
+    bundle.name = name
+    bundle.description = description
+    bundle.api_key_id = int(api_key_id) if api_key_id else None
+    bundle.frequency = frequency
+    bundle.stix_payload = payload_str
+    bundle.object_count = result['object_count']
+    bundle.bundle_size_bytes = result['size_bytes']
+    
+    db.session.add(bundle)
+    db.session.commit()
+    
+    flash(f'Bundle "{name}" uploaded successfully with {result["object_count"]} objects', 'success')
+    return redirect(url_for('custom_bundles'))
+
+
+@app.route('/admin/bundles/<int:bundle_id>/view')
+@require_auth
+@limiter.limit("30 per minute")
+def view_bundle(bundle_id):
+    """View bundle content as JSON"""
+    from models import CustomBundle
+    import json
+    
+    bundle = CustomBundle.query.get_or_404(bundle_id)
+    
+    try:
+        data = json.loads(bundle.stix_payload)
+        formatted_json = json.dumps(data, indent=2)
+    except:
+        formatted_json = bundle.stix_payload
+    
+    return render_template('bundle_view.html', bundle=bundle, json_content=formatted_json)
+
+
+@app.route('/admin/bundles/<int:bundle_id>/download')
+@require_auth
+@limiter.limit("20 per minute")
+def download_bundle(bundle_id):
+    """Download bundle as JSON file"""
+    from models import CustomBundle
+    from flask import Response
+    
+    bundle = CustomBundle.query.get_or_404(bundle_id)
+    
+    filename = f"{bundle.name.replace(' ', '_').lower()}_bundle.json"
+    
+    return Response(
+        bundle.stix_payload,
+        mimetype='application/json',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+
+@app.route('/admin/bundles/<int:bundle_id>/toggle', methods=['POST'])
+@require_auth
+@limiter.limit("20 per minute")
+def toggle_bundle(bundle_id):
+    """Toggle bundle active status"""
+    from models import CustomBundle
+    
+    bundle = CustomBundle.query.get_or_404(bundle_id)
+    bundle.is_active = not bundle.is_active
+    db.session.commit()
+    
+    status = "activated" if bundle.is_active else "deactivated"
+    flash(f'Bundle "{bundle.name}" has been {status}', 'info')
+    return redirect(url_for('custom_bundles'))
+
+
+@app.route('/admin/bundles/<int:bundle_id>/delete', methods=['POST'])
+@require_auth
+@limiter.limit("10 per minute")
+def delete_bundle(bundle_id):
+    """Delete a custom bundle"""
+    from models import CustomBundle
+    
+    bundle = CustomBundle.query.get_or_404(bundle_id)
+    bundle_name = bundle.name
+    
+    db.session.delete(bundle)
+    db.session.commit()
+    
+    flash(f'Bundle "{bundle_name}" has been deleted', 'info')
+    return redirect(url_for('custom_bundles'))
+
+
 # TAXII 2.x endpoints
 @app.route('/taxii2/')
 @limiter.limit("300 per minute")
@@ -250,7 +399,10 @@ def taxii_collection_objects(collection_id, api_key=None, log_entry=None):
         limit = 50
     added_after = request.args.get('added_after')
     
-    response_data = TAXIIServer.get_collection_objects(collection_id, limit, added_after)
+    response_data = TAXIIServer.get_collection_objects(
+        collection_id, limit, added_after, 
+        api_key=api_key, log_entry=log_entry
+    )
     
     # Update log entry with indicators served
     if log_entry:

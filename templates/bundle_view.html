@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}View Bundle: {{ bundle.name }} - MockTAXII{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('custom_bundles') }}">Custom Bundles</a></li>
+                <li class="breadcrumb-item active">{{ bundle.name }}</li>
+            </ol>
+        </nav>
+        
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">
+                    <i class="fas fa-cube me-2"></i>{{ bundle.name }}
+                </h4>
+                <div>
+                    <span class="badge bg-success me-2">{{ bundle.object_count }} objects</span>
+                    <span class="badge bg-info me-2">{{ (bundle.bundle_size_bytes / 1024)|round(1) }} KB</span>
+                    <a href="{{ url_for('download_bundle', bundle_id=bundle.id) }}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-download me-1"></i>Download
+                    </a>
+                    <a href="{{ url_for('custom_bundles') }}" class="btn btn-sm btn-secondary">
+                        <i class="fas fa-arrow-left me-1"></i>Back
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if bundle.description %}
+                    <p class="text-muted mb-3">{{ bundle.description }}</p>
+                {% endif %}
+                
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <strong>API Key:</strong>
+                        {% if bundle.api_key %}
+                            <span class="badge bg-info">{{ bundle.api_key.name }}</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Global (All Clients)</span>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Frequency:</strong>
+                        <span class="badge bg-primary">Every {{ bundle.frequency }} requests</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Times Served:</strong>
+                        <span class="badge bg-info">{{ bundle.times_served }}</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Status:</strong>
+                        {% if bundle.is_active %}
+                            <span class="badge bg-success">Active</span>
+                        {% else %}
+                            <span class="badge bg-warning">Inactive</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <h5 class="mt-4 mb-3">
+                    <i class="fas fa-code me-2"></i>STIX Bundle Content
+                </h5>
+                <div class="position-relative">
+                    <button class="btn btn-sm btn-outline-secondary position-absolute" 
+                            style="top: 10px; right: 10px; z-index: 10;"
+                            onclick="copyJson()">
+                        <i class="fas fa-copy me-1"></i>Copy
+                    </button>
+                    <pre class="bg-dark text-light p-3 rounded" style="max-height: 600px; overflow-y: auto;"><code id="json-content">{{ json_content }}</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyJson() {
+    const content = document.getElementById('json-content').textContent;
+    navigator.clipboard.writeText(content).then(() => {
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+        setTimeout(() => {
+            btn.innerHTML = originalHtml;
+        }, 2000);
+    });
+}
+</script>
+{% endblock %}

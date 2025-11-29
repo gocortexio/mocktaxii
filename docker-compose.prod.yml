@@ -1,4 +1,4 @@
-# MockTAXII v0.6.0 - Production Docker Compose Configuration
+# MockTAXII v0.7.0 - Production Docker Compose Configuration
 # Advanced production setup with security, monitoring, and SSL
 
 services:
@@ -12,6 +12,8 @@ services:
       - WTF_CSRF_ENABLED=true
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
+      - MALICIOUS_IP_TARGET_COUNT=${MALICIOUS_IP_TARGET_COUNT:-50000}
+      - SKIP_SEEDING=${SKIP_SEEDING:-false}
     depends_on:
       db:
         condition: service_healthy

@@ -1,4 +1,4 @@
-# MockTAXII v0.6.0 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+# MockTAXII v0.7.0 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
 
 services:
   web:
@@ -10,6 +10,8 @@ services:
       - SESSION_SECRET=your-secret-key-here-change-in-production
       - WTF_CSRF_ENABLED=false
       - FLASK_ENV=development
+      - MALICIOUS_IP_TARGET_COUNT=${MALICIOUS_IP_TARGET_COUNT:-5000}
+      - SKIP_SEEDING=${SKIP_SEEDING:-false}
     depends_on:
       db:
         condition: service_healthy

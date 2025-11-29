@@ -1,28 +1,35 @@
 #!/bin/bash
 
-# MockTAXII v0.6.0 Production Deployment Script
+# MockTAXII v0.7.0 Production Deployment Script
 # Advanced deployment with SSL, monitoring, and security hardening
+
+# Ensure script is run with bash, not sh
+if [ -z "$BASH_VERSION" ]; then
+    echo "[ERROR] This script requires bash. Please run with: bash $0 $*" >&2
+    echo "        Or make it executable and run: ./$0 $*" >&2
+    exit 1
+fi
 
 set -e
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.6.0"
+PROJECT_VERSION="0.7.0"
 DOMAIN="${DOMAIN:-localhost}"
 EMAIL="${LETSENCRYPT_EMAIL:-admin@example.com}"
 ENVIRONMENT="${ENVIRONMENT:-production}"
 
-# Colors
+# Colours
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_info() { printf "${BLUE}[INFO]${NC} %s\n" "$1"; }
+log_success() { printf "${GREEN}[OK]${NC} %s\n" "$1"; }
+log_warning() { printf "${YELLOW}[WARNING]${NC} %s\n" "$1"; }
+log_error() { printf "${RED}[ERROR]${NC} %s\n" "$1"; }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -51,7 +58,7 @@ install_dependencies() {
         ca-certificates
     
     # Install Docker
-    if ! command -v docker &> /dev/null; then
+    if ! command -v docker >/dev/null 2>&1; then
         log_info "Installing Docker..."
         curl -fsSL https://get.docker.com -o get-docker.sh
         sh get-docker.sh
@@ -61,14 +68,14 @@ install_dependencies() {
     fi
     
     # Install Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
+    if ! command -v docker-compose >/dev/null 2>&1; then
         log_info "Installing Docker Compose..."
         curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
         chmod +x /usr/local/bin/docker-compose
     fi
     
     # Install nginx
-    if ! command -v nginx &> /dev/null; then
+    if ! command -v nginx >/dev/null 2>&1; then
         log_info "Installing Nginx..."
         apt install -y nginx
         systemctl enable nginx
@@ -362,7 +369,7 @@ EOF
     cat > /usr/local/bin/mocktaxii-health << 'EOF'
 #!/bin/bash
 HEALTH_URL="https://localhost/api/stats"
-if ! curl -sf "$HEALTH_URL" > /dev/null; then
+if ! curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
     echo "$(date): MockTAXII health check failed" >> /var/log/mocktaxii-health.log
     # Restart services
     cd /opt/mocktaxii
@@ -448,7 +455,7 @@ deploy_production() {
     sleep 15
     
     # Verify deployment
-    if curl -sf "http://localhost/api/stats" > /dev/null; then
+    if curl -sf "http://localhost/api/stats" >/dev/null 2>&1; then
         log_success "MockTAXII v$PROJECT_VERSION production deployment completed successfully!"
         echo ""
         log_info "Your MockTAXII v$PROJECT_VERSION server is now running at:"

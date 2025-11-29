@@ -73,40 +73,12 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
 app.config['WTF_CSRF_SSL_STRICT'] = is_production  # Only require SSL in production
 app.config['WTF_CSRF_CHECK_DEFAULT'] = True
 
-# Initialize extensions
+# Initialise extensions
 db.init_app(app)
 csrf.init_app(app)
 limiter.init_app(app)
 
 with app.app_context():
-    # Import models to ensure tables are created
     import models  # noqa: F401
-    
     db.create_all()
-    
-    # Seed threat actors and comprehensive threat intelligence database
-    from models import ThreatActor, MaliciousIP, MaliciousDomain, MaliciousHash, CVE, MalwareFamily, MitreTechnique, Campaign, ReportTemplate, ThreatSubnet
-    ThreatActor.seed_default_actors()
-    
-    # Seed threat subnets first (required for large-scale IP generation)
-    ThreatSubnet.seed_spamhaus_subnets()
-    
-    # Use new subnet-based IP generation for 50k+ addresses or fallback to old method
-    current_ip_count = MaliciousIP.query.count()
-    if current_ip_count < 50000:
-        print(f"Current IP count: {current_ip_count:,}. Upgrading to subnet-based generation...")
-        MaliciousIP.seed_from_subnets(target_count=50000)
-    else:
-        print(f"Using existing {current_ip_count:,} IP addresses")
-    
-    # Seed other threat intelligence components
-    MaliciousDomain.seed_default_domains()
-    MalwareFamily.seed_malware_families()  # Seed malware families first
-    MaliciousHash.seed_default_hashes()  # This now depends on malware families
-    CVE.seed_from_cisa_kev()
-    MitreTechnique.seed_mitre_techniques()  # Seed MITRE ATT&CK techniques
-    Campaign.seed_campaigns()  # Seed 100 diverse campaigns
-    ReportTemplate.seed_report_templates()  # Seed 50 report templates
-    
-    # Import routes after app is configured
     import routes  # noqa: F401
