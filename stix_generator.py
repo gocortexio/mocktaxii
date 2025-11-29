@@ -284,7 +284,7 @@ class STIXGenerator:
             description = "Unknown threat actor"
             threat_actor_types = ["criminal-enterprise"]
             sophistication = "intermediate"
-            resource_level = "organisation"
+            resource_level = "organization"
             primary_motivation = "financial-gain"
         else:
             actor_name = db_actor.name
@@ -453,20 +453,27 @@ class STIXGenerator:
     
     @staticmethod
     def generate_note_object(threat_actor_name):
-        """Generate a STIX note object with threat actor intelligence"""
+        """Generate a STIX note object using database-driven note templates"""
+        from models import NoteTemplate
+        
         note_id = f"note--{uuid.uuid4()}"
         timestamp = STIXGenerator.generate_timestamp()
         
-        # Generate realistic threat intelligence notes with PDF reference URLs
-        note_templates = [
-            f"Intelligence report on {threat_actor_name} activities observed targeting financial institutions with credential harvesting campaigns. Full analysis available at: https://simonsigre.com/threat-actor-analysis-{threat_actor_name.lower().replace(' ', '-')}.pdf",
-            f"Analysis of {threat_actor_name} infrastructure reveals use of compromised domains for command and control operations. Technical details: https://simonsigre.com/infrastructure-analysis-{threat_actor_name.lower().replace(' ', '-')}.pdf",
-            f"Recent campaign attribution links {threat_actor_name} to advanced persistent threat activities in healthcare sector. Report: https://simonsigre.com/healthcare-threats-{threat_actor_name.lower().replace(' ', '-')}.pdf",
-            f"Technical analysis indicates {threat_actor_name} employs living-off-the-land techniques to evade detection. Methodology: https://simonsigre.com/lotl-techniques-{threat_actor_name.lower().replace(' ', '-')}.pdf",
-            f"Threat hunting investigation reveals {threat_actor_name} infrastructure overlaps with previously observed campaigns. Research: https://simonsigre.com/threat-hunting-{threat_actor_name.lower().replace(' ', '-')}.pdf"
-        ]
+        # Get random note template from database (25 diverse templates)
+        template = NoteTemplate.get_random_active()
         
-        note_content = random.choice(note_templates)
+        # Create slug version for URL generation
+        threat_actor_slug = threat_actor_name.lower().replace(' ', '-')
+        
+        if template:
+            # Generate content using template placeholders
+            note_content = template.content_format.format(
+                threat_actor_name=threat_actor_name,
+                threat_actor_slug=threat_actor_slug
+            )
+        else:
+            # Fallback if no templates in database
+            note_content = f"Intelligence report on {threat_actor_name} activities observed targeting organisations with sophisticated campaigns. Full analysis available at: https://simonsigre.com/threat-actor-analysis-{threat_actor_slug}.pdf"
         
         return {
             "type": "note",
@@ -590,14 +597,23 @@ class STIXGenerator:
         # Generate indicators
         indicators = []
         for _ in range(count):
-            indicator_type = random.choice(['ip', 'domain', 'hash'])
+            indicator_type = random.choice(['ip', 'domain', 'hash', 'software'])
             if indicator_type == 'ip':
                 indicator = STIXGenerator.generate_ip_indicator()
+                indicators.append(indicator)
             elif indicator_type == 'domain':
                 indicator = STIXGenerator.generate_domain_indicator()
-            else:
+                indicators.append(indicator)
+            elif indicator_type == 'hash':
                 indicator = STIXGenerator.generate_file_hash_indicator()
-            indicators.append(indicator)
+                indicators.append(indicator)
+            else:
+                software_objects = STIXGenerator.generate_software_bundle()
+                if software_objects:
+                    objects.extend(software_objects)
+                    software_indicator = next((obj for obj in software_objects if obj.get("type") == "indicator"), None)
+                    if software_indicator:
+                        indicators.append(software_indicator)
         
         objects.extend(indicators)
         
@@ -695,6 +711,173 @@ class STIXGenerator:
             report["id"], campaign["id"], "related-to",
             "Intelligence publication analysing campaign infrastructure and tactics"
         ))
+        
+        objects.extend(relationships)
+        
+        return objects
+    
+    @staticmethod
+    def generate_software_sdo():
+        """Generate a STIX Software SDO from database"""
+        from models import MaliciousSoftware
+        
+        software_obj = MaliciousSoftware.get_random_active()
+        if not software_obj:
+            return None
+        
+        software_id = f"software--{uuid.uuid4()}"
+        timestamp = STIXGenerator.generate_timestamp()
+        
+        software_sdo = {
+            "type": "software",
+            "spec_version": "2.1",
+            "id": software_id,
+            "created": timestamp,
+            "modified": timestamp,
+            "name": software_obj.package_name,
+            "version": software_obj.version,
+            "cpe": [software_obj.cpe],
+            "x_vendor": software_obj.vendor,
+            "x_malware_type": software_obj.malware_type,
+            "x_is_typosquat": software_obj.is_typosquat,
+            "x_confidence_score": software_obj.confidence_score,
+            "x_download_url": software_obj.download_url
+        }
+        
+        return software_sdo, software_obj
+    
+    @staticmethod
+    def generate_artifact_sco(software_obj):
+        """Generate a STIX Artifact SCO for a software package"""
+        artifact_id = f"artifact--{uuid.uuid4()}"
+        timestamp = STIXGenerator.generate_timestamp()
+        
+        artifact_sco = {
+            "type": "artifact",
+            "spec_version": "2.1",
+            "id": artifact_id,
+            "mime_type": "application/x-wheel+zip",
+            "hashes": {
+                "SHA-256": software_obj.artifact_hash
+            },
+            "x_file_name": f"{software_obj.package_name}-{software_obj.version}-py3-none-any.whl"
+        }
+        
+        return artifact_sco
+    
+    @staticmethod
+    def generate_url_sco(software_obj):
+        """Generate a STIX URL SCO for a software download location"""
+        url_id = f"url--{uuid.uuid4()}"
+        
+        url_sco = {
+            "type": "url",
+            "spec_version": "2.1",
+            "id": url_id,
+            "value": software_obj.download_url
+        }
+        
+        return url_sco
+    
+    @staticmethod
+    def generate_software_indicator(software_obj):
+        """
+        Generate a TIM-compatible STIX Indicator for malicious software.
+        
+        Uses URL and file hash patterns that XSOAR TIM recognises, with
+        external_references containing the download URL and CPE identifier.
+        """
+        indicator_id = f"indicator--{uuid.uuid4()}"
+        timestamp = STIXGenerator.generate_timestamp()
+        score = STIXGenerator.convert_score_to_text(software_obj.confidence_score)
+        
+        pattern = f"([url:value = '{software_obj.download_url}']) OR ([file:hashes.'SHA-256' = '{software_obj.artifact_hash}'])"
+        
+        indicator = {
+            "type": "indicator",
+            "spec_version": "2.1",
+            "id": indicator_id,
+            "created": timestamp,
+            "modified": timestamp,
+            "name": f"Malicious PyPI Package: {software_obj.package_name}",
+            "description": STIXGenerator.add_disclaimer(software_obj.description),
+            "pattern": pattern,
+            "pattern_type": "stix",
+            "pattern_version": "2.1",
+            "labels": ["malicious-activity", "supply-chain-compromise"],
+            "indicator_types": ["malicious-activity"],
+            "verdict": "malicious",
+            "score": score,
+            "valid_from": timestamp,
+            "external_references": [
+                {
+                    "source_name": "pypi",
+                    "external_id": software_obj.package_name,
+                    "url": software_obj.download_url,
+                    "description": f"Malicious PyPI package {software_obj.package_name} v{software_obj.version}"
+                },
+                {
+                    "source_name": "cpe",
+                    "external_id": software_obj.cpe,
+                    "url": f"https://nvd.nist.gov/products/cpe/search/results?namingFormat=2.3&keyword={software_obj.package_name}",
+                    "description": "Common Platform Enumeration identifier"
+                }
+            ]
+        }
+        
+        return indicator
+    
+    @staticmethod
+    def generate_software_bundle():
+        """
+        Generate a TIM-compatible software supply chain threat bundle.
+        
+        Emits an Indicator SDO with URL/hash pattern that XSOAR TIM recognises,
+        plus campaign relationships using 'indicates' relationship type.
+        """
+        from models import MaliciousSoftware, Campaign
+        
+        software_obj = MaliciousSoftware.get_random_active()
+        if not software_obj:
+            return []
+        
+        indicator = STIXGenerator.generate_software_indicator(software_obj)
+        
+        objects = [indicator]
+        relationships = []
+        
+        if software_obj.campaign_id:
+            campaign = Campaign.query.get(software_obj.campaign_id)
+            if campaign:
+                campaign_id = f"campaign--{uuid.uuid5(uuid.NAMESPACE_DNS, f'mocktaxii-campaign-{campaign.id}')}"
+                timestamp = STIXGenerator.generate_timestamp()
+                
+                campaign_sdo = {
+                    "type": "campaign",
+                    "spec_version": "2.1",
+                    "id": campaign_id,
+                    "created": timestamp,
+                    "modified": timestamp,
+                    "name": campaign.name,
+                    "description": STIXGenerator.add_disclaimer(campaign.description),
+                    "first_seen": timestamp,
+                    "last_seen": timestamp,
+                    "labels": [campaign.campaign_type, campaign.sophistication_level]
+                }
+                
+                if campaign.target_sectors:
+                    campaign_sdo["x_target_sectors"] = campaign.target_sectors
+                if campaign.target_regions:
+                    campaign_sdo["x_target_regions"] = campaign.target_regions
+                if campaign.motivation:
+                    campaign_sdo["x_motivation"] = campaign.motivation
+                
+                objects.append(campaign_sdo)
+                
+                relationships.append(STIXGenerator.generate_relationship(
+                    indicator["id"], campaign_id, "indicates",
+                    f"Malicious package {software_obj.package_name} indicates {campaign.name}"
+                ))
         
         objects.extend(relationships)
         

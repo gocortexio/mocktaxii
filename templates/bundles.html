@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}Custom Bundles - MockTAXII{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-upload me-2"></i>Upload Bundle
+                </h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('upload_bundle') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Bundle Name *</label>
+                        <input type="text" class="form-control" id="name" name="name" 
+                               placeholder="e.g., APT29 Campaign" required maxlength="100">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="description" class="form-label">Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="2"
+                                  placeholder="Optional description"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="bundle_file" class="form-label">STIX Bundle File *</label>
+                        <input type="file" class="form-control" id="bundle_file" name="bundle_file" 
+                               accept=".json" required>
+                        <div class="form-text">JSON file containing a valid STIX 2.1 bundle (max 10MB)</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="api_key_id" class="form-label">Apply to API Key</label>
+                        <select class="form-select" id="api_key_id" name="api_key_id">
+                            <option value="">All Clients (Global)</option>
+                            {% for key in api_keys %}
+                                <option value="{{ key.id }}">{{ key.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Select a specific client or leave as global</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="frequency" class="form-label">Serve Every N Requests</label>
+                        <input type="number" class="form-control" id="frequency" name="frequency" 
+                               value="10" min="1" max="1000">
+                        <div class="form-text">Serve this bundle every N requests from the client</div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-upload me-2"></i>Upload Bundle
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle me-2"></i>How It Works
+                </h5>
+            </div>
+            <div class="card-body small">
+                <p>Custom bundles allow you to serve your own pre-made STIX data instead of randomly generated content.</p>
+                
+                <h6>Frequency Setting</h6>
+                <p class="text-muted">If set to 10, the custom bundle will be served on every 10th request from the client. Other requests receive randomly generated data.</p>
+                
+                <h6>Client Assignment</h6>
+                <p class="text-muted mb-0">
+                    <strong>Global:</strong> Applies to all API keys<br>
+                    <strong>Specific:</strong> Only applies to the selected API key
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">
+                    <i class="fas fa-cubes me-2"></i>Custom Bundles
+                </h4>
+                <span class="badge bg-secondary">{{ bundles|length }} bundle(s)</span>
+            </div>
+            <div class="card-body">
+                {% if bundles %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Client</th>
+                                    <th>Frequency</th>
+                                    <th>Objects</th>
+                                    <th>Served</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for bundle in bundles %}
+                                    <tr class="{% if not bundle.is_active %}text-muted{% endif %}">
+                                        <td>
+                                            <strong>{{ bundle.name }}</strong>
+                                            {% if bundle.description %}
+                                                <br><small class="text-muted">{{ bundle.description[:50] }}{% if bundle.description|length > 50 %}...{% endif %}</small>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if bundle.api_key %}
+                                                <span class="badge bg-info">{{ bundle.api_key.name }}</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Global</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-primary">Every {{ bundle.frequency }}</span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-success">{{ bundle.object_count }}</span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-info">{{ bundle.times_served }}x</span>
+                                            {% if bundle.last_served_at %}
+                                                <br><small class="text-muted">{{ bundle.last_served_at.strftime('%m/%d %H:%M') }}</small>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if bundle.is_active %}
+                                                <span class="badge bg-success">Active</span>
+                                            {% else %}
+                                                <span class="badge bg-warning">Inactive</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <a href="{{ url_for('view_bundle', bundle_id=bundle.id) }}" 
+                                                   class="btn btn-outline-secondary" title="View">
+                                                    <i class="fas fa-eye"></i>
+                                                </a>
+                                                <a href="{{ url_for('download_bundle', bundle_id=bundle.id) }}" 
+                                                   class="btn btn-outline-secondary" title="Download">
+                                                    <i class="fas fa-download"></i>
+                                                </a>
+                                                <form method="POST" action="{{ url_for('toggle_bundle', bundle_id=bundle.id) }}" 
+                                                      style="display: inline;">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                    <button type="submit" class="btn btn-outline-{% if bundle.is_active %}warning{% else %}success{% endif %}" 
+                                                            title="{% if bundle.is_active %}Deactivate{% else %}Activate{% endif %}">
+                                                        <i class="fas fa-{% if bundle.is_active %}pause{% else %}play{% endif %}"></i>
+                                                    </button>
+                                                </form>
+                                                <form method="POST" action="{{ url_for('delete_bundle', bundle_id=bundle.id) }}" 
+                                                      style="display: inline;"
+                                                      onsubmit="return confirm('Are you sure you want to delete this bundle?')">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                                    <button type="submit" class="btn btn-outline-danger" title="Delete">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-cubes fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">No Custom Bundles</h5>
+                        <p class="text-muted">Upload your first custom STIX bundle to serve pre-made threat intelligence.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

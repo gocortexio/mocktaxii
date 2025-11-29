@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from flask import request, jsonify, abort
 from functools import wraps
-from models import ApiKey, RequestLog, ServerStats, db
+from models import ApiKey, RequestLog, ServerStats, CustomBundle, db
 from stix_generator import STIXGenerator
 from version import __version__
 
@@ -45,8 +45,9 @@ class TAXIIServer:
             log_entry.user_agent = request.headers.get('User-Agent')
             db.session.add(log_entry)
             
-            # Increment API key usage
+            # Increment API key usage and bundle tracking counter
             api_key.request_count += 1
+            api_key.requests_since_bundle += 1
             db.session.commit()
             
             # Add api_key to kwargs for use in the endpoint
@@ -98,7 +99,7 @@ class TAXIIServer:
         }
     
     @staticmethod
-    def get_collection_objects(collection_id, limit=50, added_after=None):
+    def get_collection_objects(collection_id, limit=50, added_after=None, api_key=None, log_entry=None):
         """Get objects from a specific collection"""
         if collection_id != TAXIIServer.COLLECTION_ID:
             abort(404, description="Collection not found")
@@ -109,15 +110,33 @@ class TAXIIServer:
         except (ValueError, TypeError):
             limit = 50
         
-        # Generate related STIX objects with relationships
-        stix_objects = STIXGenerator.generate_related_indicators_bundle(limit)
+        # Check if we should serve a custom bundle
+        custom_bundle_served = False
+        bundle = None
         
-        # Create STIX bundle
-        bundle = STIXGenerator.create_stix_bundle(stix_objects)
+        if api_key:
+            custom_bundle = CustomBundle.get_bundle_for_api_key(api_key.id)
+            if custom_bundle:
+                if api_key.requests_since_bundle >= custom_bundle.frequency:
+                    stix_data = custom_bundle.get_stix_bundle()
+                    if stix_data:
+                        bundle = stix_data
+                        custom_bundle_served = True
+                        custom_bundle.mark_served()
+                        api_key.requests_since_bundle = 0
+                        if log_entry:
+                            log_entry.custom_bundle_served = True
+                            log_entry.custom_bundle_id = custom_bundle.id
+                        db.session.commit()
+        
+        if not bundle:
+            # Generate related STIX objects with relationships
+            stix_objects = STIXGenerator.generate_related_indicators_bundle(limit)
+            bundle = STIXGenerator.create_stix_bundle(stix_objects)
         
         # Update server stats
         stats = ServerStats.get_stats()
-        stats.increment_indicators(len(stix_objects))
+        stats.increment_indicators(len(bundle.get('objects', [])))
         
         return bundle
     
