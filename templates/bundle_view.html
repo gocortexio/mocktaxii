@@ -1,3 +1,7 @@
+{#
+SPDX-FileCopyrightText: GoCortexIO
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
 {% extends "base.html" %}
 
 {% block title %}View Bundle: {{ bundle.name }} - MockTAXII{% endblock %}
@@ -15,16 +19,16 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0">
-                    <i class="fas fa-cube me-2"></i>{{ bundle.name }}
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-cube"></use></svg>{{ bundle.name }}
                 </h4>
                 <div>
                     <span class="badge bg-success me-2">{{ bundle.object_count }} objects</span>
                     <span class="badge bg-info me-2">{{ (bundle.bundle_size_bytes / 1024)|round(1) }} KB</span>
                     <a href="{{ url_for('download_bundle', bundle_id=bundle.id) }}" class="btn btn-sm btn-outline-primary">
-                        <i class="fas fa-download me-1"></i>Download
+                        <svg class="icon me-1" aria-hidden="true"><use href="#i-download"></use></svg>Download
                     </a>
                     <a href="{{ url_for('custom_bundles') }}" class="btn btn-sm btn-secondary">
-                        <i class="fas fa-arrow-left me-1"></i>Back
+                        <svg class="icon me-1" aria-hidden="true"><use href="#i-arrow-left"></use></svg>Back
                     </a>
                 </div>
             </div>
@@ -61,13 +65,13 @@
                 </div>
                 
                 <h5 class="mt-4 mb-3">
-                    <i class="fas fa-code me-2"></i>STIX Bundle Content
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-code"></use></svg>STIX Bundle Content
                 </h5>
                 <div class="position-relative">
                     <button class="btn btn-sm btn-outline-secondary position-absolute" 
                             style="top: 10px; right: 10px; z-index: 10;"
-                            onclick="copyJson()">
-                        <i class="fas fa-copy me-1"></i>Copy
+                            onclick="copyJson(this)">
+                        <svg class="icon me-1" aria-hidden="true"><use href="#i-copy"></use></svg>Copy
                     </button>
                     <pre class="bg-dark text-light p-3 rounded" style="max-height: 600px; overflow-y: auto;"><code id="json-content">{{ json_content }}</code></pre>
                 </div>
@@ -79,16 +83,43 @@
 
 {% block scripts %}
 <script>
-function copyJson() {
+// navigator.clipboard is undefined outside a secure context, and the README
+// documents reaching this app over plain http://. The button used to throw
+// there and do nothing at all, so fall back to the textarea/execCommand path
+// and confirm only once the copy has actually happened.
+function copyJson(btn) {
     const content = document.getElementById('json-content').textContent;
-    navigator.clipboard.writeText(content).then(() => {
-        const btn = event.target.closest('button');
+    const confirmCopied = () => {
         const originalHtml = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
-        setTimeout(() => {
-            btn.innerHTML = originalHtml;
-        }, 2000);
-    });
+        btn.innerHTML = '<svg class="icon me-1" aria-hidden="true"><use href="#i-check"></use></svg>Copied!';
+        setTimeout(() => { btn.innerHTML = originalHtml; }, 2000);
+    };
+    const warn = () => {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<svg class="icon me-1" aria-hidden="true"><use href="#i-times"></use></svg>Copy failed';
+        setTimeout(() => { btn.innerHTML = originalHtml; }, 2000);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(content).then(confirmCopied).catch(warn);
+        return;
+    }
+
+    const scratch = document.createElement('textarea');
+    scratch.value = content;
+    scratch.setAttribute('readonly', '');
+    scratch.style.position = 'fixed';
+    scratch.style.opacity = '0';
+    document.body.appendChild(scratch);
+    scratch.select();
+    let ok = false;
+    try {
+        ok = document.execCommand('copy');
+    } catch (e) {
+        ok = false;
+    }
+    document.body.removeChild(scratch);
+    (ok ? confirmCopied : warn)();
 }
 </script>
 {% endblock %}

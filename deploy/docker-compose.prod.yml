@@ -1,0 +1,218 @@
+# SPDX-FileCopyrightText: GoCortexIO
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# MockTAXII v1.1.4 - Production Docker Compose Configuration
+# Advanced production setup with security, monitoring, and SSL
+
+# Pin the Compose project name. Compose otherwise derives it from the
+# directory of the first -f file, which is deploy/ - so moving this file
+# renamed the project from "mocktaxii" to "deploy" and pointed the stack
+# at a brand-new deploy_postgres_data volume, orphaning the database of
+# every deployment made before the move.
+name: mocktaxii
+
+services:
+  web:
+    build:
+      # This file lives in deploy/, so every relative path here resolves from
+      # deploy/ - not from the repository root and not from the caller's cwd.
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://mocktaxii:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/mocktaxii
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET must be set}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - WTF_CSRF_ENABLED=${WTF_CSRF_ENABLED:-true}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      # Production proxy modes set this true because Nginx/Traefik terminate
+      # in front of the service. Local/no-proxy mode sets it false.
+      - TRUST_PROXY=${TRUST_PROXY:-true}
+      - PYTHONUNBUFFERED=1
+      - MALICIOUS_IP_TARGET_COUNT=${MALICIOUS_IP_TARGET_COUNT:-50000}
+      - SKIP_SEEDING=${SKIP_SEEDING:-false}
+      - REQUEST_LOG_RETENTION_DAYS=${REQUEST_LOG_RETENTION_DAYS:-90}
+      # Documented in the README and production.env.template but previously
+      # never reached the container, so setting them had no effect at all.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-10}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-20}
+      - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      - DB_POOL_RECYCLE=${DB_POOL_RECYCLE:-300}
+      - MOCKTAXII_STATE_DIR=${MOCKTAXII_STATE_DIR:-/tmp}
+      - PYTHONHTTPSVERIFY=1
+    # Keep the application reachable for an intentional local/no-proxy mode,
+    # but never publish it beyond the host. Nginx/Traefik use the service
+    # network directly.
+    ports:
+      - "127.0.0.1:${APP_PORT:-5000}:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mocktaxii-network
+    # db, nginx and traefik all carry this; web is the service that actually
+    # terminates user traffic and parses attacker-controlled TAXII input, so
+    # it is the one that needed it most. Blocks a setuid binary from
+    # regaining privilege the Dockerfile's `USER app` gave up.
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ../logs:/app/logs
+    # Carried over from the generated compose file that production-deploy.sh
+    # used to write. NB: gunicorn runs 2 workers x 4 threads, so 0.5 CPU is the
+    # binding constraint under load, not the worker count.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mocktaxii.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.mocktaxii.entrypoints=websecure"
+      - "traefik.http.routers.mocktaxii.tls=true"
+      - "traefik.http.routers.mocktaxii.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.mocktaxii.middlewares=mocktaxii-bodylimit@docker"
+      - "traefik.http.routers.mocktaxii-http.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.mocktaxii-http.entrypoints=web"
+      - "traefik.http.routers.mocktaxii-http.middlewares=mocktaxii-https-redirect"
+      - "traefik.http.middlewares.mocktaxii-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.services.mocktaxii.loadbalancer.server.port=5000"
+      # Reject request bodies > 10MB at the edge so giant uploads can't even
+      # reach the Flask app (matches MAX_CONTENT_LENGTH and nginx limits).
+      - "traefik.http.middlewares.mocktaxii-bodylimit.buffering.maxRequestBodyBytes=10485760"
+      - "traefik.http.middlewares.mocktaxii-bodylimit.buffering.memRequestBodyBytes=2097152"
+    # Container stdout is the only log this stack actually produces; gunicorn
+    # writes an access line per request. Docker's json-file driver keeps it
+    # unbounded by default, so a steadily polled deployment fills
+    # /var/lib/docker with several hundred MB a day and nothing ever reclaims
+    # it. Cap and rotate it here, where the logs really are.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    # NB: two upgrade hazards, the same pair documented in the lab
+    # docker-compose.yml.
+    # 1. A PostgreSQL major-version bump will not start against a data
+    #    directory created by an older major. production-deploy.sh checks for
+    #    this before it stages anything and aborts with the dump/restore
+    #    procedure; REQUIRED_PG_MAJOR there must be bumped with this tag.
+    # 2. postgres:18+ expects the volume at /var/lib/postgresql, not
+    #    /var/lib/postgresql/data, and stores the cluster in a version
+    #    subdirectory. Deployments from v1.1.0 and earlier used the old path.
+    image: postgres:18-alpine
+    environment:
+      - POSTGRES_DB=mocktaxii
+      - POSTGRES_USER=mocktaxii
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mocktaxii"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
+    networks:
+      - mocktaxii-network
+    security_opt:
+      - no-new-privileges:true
+
+  nginx:
+    # The deployment script enables exactly one proxy profile. Keeping Nginx
+    # profiled prevents it from colliding with the optional Traefik service.
+    profiles: ["nginx"]
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - web
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
+    networks:
+      - mocktaxii-network
+    security_opt:
+      - no-new-privileges:true
+
+  # Alternative reverse proxy. The deployment script enables this profile
+  # instead of nginx when PROXY=traefik; never run both on the same host.
+  traefik:
+    profiles: ["traefik"]
+    image: traefik:v3.6
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL:-}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      # Dashboard on loopback only - it was published on every interface with
+      # no authentication in front of it.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt_data:/letsencrypt
+      - traefik_logs:/var/log/traefik
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: unless-stopped
+    networks:
+      - mocktaxii-network
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  traefik_logs:
+    driver: local
+  letsencrypt_data:
+    driver: local
+
+networks:
+  mocktaxii-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

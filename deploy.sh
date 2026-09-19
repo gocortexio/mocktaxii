@@ -1,6 +1,8 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: GoCortexIO
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
-# MockTAXII v0.7.0 Docker Deployment Script
+# MockTAXII v1.1.4 Docker Deployment Script
 # Usage: ./deploy.sh [start|stop|restart|logs|status|backup|restore]
 
 # Ensure script is run with bash, not sh
@@ -10,12 +12,11 @@ if [ -z "$BASH_VERSION" ]; then
     exit 1
 fi
 
-set -e
+set -euo pipefail
 
 # Configuration
 PROJECT_NAME="mocktaxii"
-PROJECT_VERSION="0.7.0"
-COMPOSE_FILE="docker-compose.yml"
+PROJECT_VERSION="1.1.4"
 BACKUP_DIR="./backups"
 
 # IP Count Configuration (from environment or prompt)
@@ -50,11 +51,15 @@ prompt_ip_count() {
     log_info "Malicious IP Address Configuration"
     echo "  Choose the number of IP addresses to generate:"
     echo ""
-    echo "  [1] 5,000   - Quick demo (fastest startup, ~2 minutes)"
-    echo "  [2] 10,000  - Small testing environment"
-    echo "  [3] 25,000  - Medium deployment"
-    echo "  [4] 50,000  - Production deployment"
-    echo "  [5] 100,000 - Large-scale production (slow startup)"
+    # Figures are the IP generation step alone, matching the table in README.md.
+    # A full first boot adds the Spamhaus DROP and CISA KEV fetches: measured at
+    # roughly 20 seconds end to end at the 5,000 default. The menu previously
+    # said "~2 minutes" for that case, about six times the measured time.
+    echo "  [1] 5,000   - Quick demo (~2s to generate, ~20s first boot)"
+    echo "  [2] 10,000  - Small testing environment (~3s)"
+    echo "  [3] 25,000  - Medium deployment (~6s)"
+    echo "  [4] 50,000  - Production deployment (~10s)"
+    echo "  [5] 100,000 - Large-scale production (~20s)"
     echo "  [6] Custom  - Enter a custom value"
     echo ""
     read -p "Select option [1-6] (default: 1): " ip_choice
@@ -91,7 +96,7 @@ check_dependencies() {
         exit 1
     fi
     
-    if ! command -v docker-compose >/dev/null 2>&1; then
+    if ! docker compose version >/dev/null 2>&1; then
         log_error "Docker Compose is not installed. Please install Docker Compose first."
         exit 1
     fi
@@ -102,6 +107,11 @@ check_dependencies() {
 generate_env_file() {
     if [ ! -f ".env" ]; then
         log_info "Generating .env file..."
+        # umask before the redirect, so the file is never briefly world-readable
+        # between creation and a later chmod. It holds SESSION_SECRET and
+        # POSTGRES_PASSWORD; deploy/production-deploy.sh already does the
+        # equivalent for .env.prod, and the local script should not be laxer.
+        ( umask 077
         cat > .env << EOF
 # Database Configuration
 POSTGRES_DB=mocktaxii
@@ -118,15 +128,23 @@ MALICIOUS_IP_TARGET_COUNT=${MALICIOUS_IP_TARGET_COUNT:-5000}
 
 # Security Configuration
 WTF_CSRF_ENABLED=true
-FLASK_ENV=production
+# This stack serves plain HTTP on localhost, so it runs in development mode:
+# production sets Secure cookies and strict HTTPS CSRF, which would make the
+# admin UI unreachable over http://. docker-compose.yml pins this value, so
+# changing it here has no effect - use deploy/ for a real production stack.
+FLASK_ENV=development
 
-# Optional: Change admin password (default: randomly generated)
+# Optional: Provide your own admin password instead of using the
+# randomly generated one. The generated password is stored only in
+# /tmp/mocktaxii_admin_password inside the container, never logged.
 # ADMIN_PASSWORD=your-secure-password-here
 
 # Optional: Skip seeding on restart (set to true after initial setup)
 # SKIP_SEEDING=false
 EOF
-        log_success ".env file created with secure random passwords"
+        )
+        chmod 600 .env
+        log_success ".env file created with secure random passwords (mode 600)"
         log_warning "Please review and customise the .env file if needed"
     else
         log_info ".env file already exists, skipping generation"
@@ -147,7 +165,7 @@ start_services() {
     mkdir -p "$BACKUP_DIR"
     
     # Prompt for IP count if not already set
-    if [ -z "$MALICIOUS_IP_TARGET_COUNT" ]; then
+    if [ -z "${MALICIOUS_IP_TARGET_COUNT:-}" ]; then
         prompt_ip_count
     fi
     
@@ -156,36 +174,37 @@ start_services() {
     
     # Pull latest images
     log_info "Pulling latest Docker images..."
-    docker-compose pull
+    docker compose pull
     
     # Build and start services
     log_info "Building and starting services..."
-    docker-compose up -d --build
+    docker compose up -d --build
     
     # Wait for services to be ready
     log_info "Waiting for services to be ready..."
     sleep 10
     
     # Check if services are running
-    if docker-compose ps | grep -q "Up"; then
+    if docker compose ps | grep -q "Up"; then
         log_success "MockTAXII v$PROJECT_VERSION services started successfully!"
         echo ""
         log_info "Service URLs:"
         echo "  - Web Interface: http://localhost:5001"
         echo "  - TAXII Discovery: http://localhost:5001/taxii2/"
-        echo "  - Admin Password: Check container logs for randomly generated password"
+        echo "  - Admin Password: Run 'docker compose exec web cat /tmp/mocktaxii_admin_password'"
+        echo "  - Tip: Set ADMIN_PASSWORD in .env to use a custom password instead"
         echo "  - Note: Initial CVE data will be fetched from CISA on first startup"
         echo ""
-        log_info "Use 'docker-compose logs -f' to view logs"
+        log_info "Use 'docker compose logs -f' to view logs"
     else
-        log_error "Failed to start services. Check logs with: docker-compose logs"
+        log_error "Failed to start services. Check logs with: docker compose logs"
         exit 1
     fi
 }
 
 stop_services() {
     log_info "Stopping MockTAXII services..."
-    docker-compose down
+    docker compose down
     log_success "Services stopped"
 }
 
@@ -197,16 +216,16 @@ restart_services() {
 
 show_logs() {
     log_info "Showing service logs (Press Ctrl+C to exit)..."
-    docker-compose logs -f
+    docker compose logs -f
 }
 
 show_status() {
     log_info "Service Status:"
-    docker-compose ps
+    docker compose ps
     echo ""
     
     log_info "Resource Usage:"
-    docker stats --no-stream $(docker-compose ps -q) 2>/dev/null || log_warning "No running containers found"
+    docker stats --no-stream $(docker compose ps -q) 2>/dev/null || log_warning "No running containers found"
     echo ""
     
     # Check if web service is responding
@@ -226,11 +245,15 @@ backup_database() {
     # Generate backup filename with timestamp
     BACKUP_FILE="$BACKUP_DIR/mocktaxii_backup_$(date +%Y%m%d_%H%M%S).sql"
     
-    # Create backup
-    if docker-compose exec -T db pg_dump -U mocktaxii mocktaxii > "$BACKUP_FILE"; then
+    # --clean --if-exists so the dump can actually be replayed over an existing
+    # schema. Without it every CREATE in the dump fails with "already exists"
+    # on restore, which is how a restore could report success having changed
+    # nothing.
+    if docker compose exec -T db pg_dump --clean --if-exists -U mocktaxii mocktaxii > "$BACKUP_FILE"; then
         log_success "Database backup created: $BACKUP_FILE"
     else
         log_error "Failed to create database backup"
+        rm -f "$BACKUP_FILE"
         exit 1
     fi
 }
@@ -257,14 +280,26 @@ restore_database() {
     
     log_info "Restoring database from: $BACKUP_FILE"
     
-    # Stop services, restore database, start services
-    docker-compose stop web
-    if docker-compose exec -T db psql -U mocktaxii mocktaxii < "$BACKUP_FILE"; then
-        docker-compose start web
+    # Stop services, restore database, start services.
+    #
+    # ON_ERROR_STOP makes psql's exit status mean something: without it psql
+    # exits 0 even when every statement in the dump failed, so a restore that
+    # changed nothing still printed "restored successfully".
+    #
+    # --single-transaction makes the restore all-or-nothing, so a dump that
+    # fails part way through rolls back rather than leaving a half-restored
+    # database behind.
+    docker compose stop web
+    if docker compose exec -T db psql -v ON_ERROR_STOP=1 --single-transaction \
+            -U mocktaxii mocktaxii < "$BACKUP_FILE"; then
+        docker compose start web
         log_success "Database restored successfully"
     else
-        log_error "Failed to restore database"
-        docker-compose start web
+        log_error "Restore failed and was rolled back; the database is unchanged."
+        log_error "A dump taken before this version has no DROP statements, so it"
+        log_error "cannot be replayed over an existing schema. Restore it into an"
+        log_error "empty database, or take a fresh backup with this version."
+        docker compose start web
         exit 1
     fi
 }
@@ -278,7 +313,7 @@ cleanup() {
     fi
     
     log_info "Cleaning up all Docker resources..."
-    docker-compose down -v --remove-orphans
+    docker compose down -v --remove-orphans
     docker system prune -f
     log_success "Cleanup completed"
 }
@@ -297,9 +332,9 @@ update_application() {
     
     # Rebuild and restart
     log_info "Rebuilding application..."
-    docker-compose down
-    docker-compose build --no-cache
-    docker-compose up -d
+    docker compose down
+    docker compose build --no-cache
+    docker compose up -d
     
     log_success "Application updated successfully"
 }
@@ -350,7 +385,7 @@ case "${1:-help}" in
         backup_database
         ;;
     restore)
-        restore_database "$2"
+        restore_database "${2:-}"
         ;;
     update)
         check_dependencies

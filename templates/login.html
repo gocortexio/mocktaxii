@@ -1,3 +1,7 @@
+{#
+SPDX-FileCopyrightText: GoCortexIO
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
 {% extends "base.html" %}
 
 {% block title %}Login - MockTAXII{% endblock %}
@@ -8,7 +12,7 @@
         <div class="card">
             <div class="card-header text-center">
                 <h4 class="mb-0">
-                    <i class="fas fa-lock me-2"></i>Access Control
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-lock"></use></svg>Access Control
                 </h4>
             </div>
             <div class="card-body">
@@ -28,14 +32,14 @@
                     
                     <div class="d-grid">
                         <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-sign-in-alt me-2"></i>Login
+                            <svg class="icon me-2" aria-hidden="true"><use href="#i-sign-in-alt"></use></svg>Login
                         </button>
                     </div>
                 </form>
                 
                 <div class="text-center mt-3">
                     <a href="{{ url_for('index') }}" class="text-decoration-none">
-                        <i class="fas fa-arrow-left me-1"></i>Back to Home
+                        <svg class="icon me-1" aria-hidden="true"><use href="#i-arrow-left"></use></svg>Back to Home
                     </a>
                 </div>
             </div>

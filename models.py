@@ -1,5 +1,11 @@
+# SPDX-FileCopyrightText: GoCortexIO
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 from app import db
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import defer
+import logging
 import uuid
 
 class ApiKey(db.Model):
@@ -9,49 +15,107 @@ class ApiKey(db.Model):
     description = db.Column(db.Text)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     is_active = db.Column(db.Boolean, nullable=False, default=True)
-    request_count = db.Column(db.Integer, nullable=False, default=0)
+    # BigInteger: a busy key can pass int4's 2.1bn ceiling, and an overflow
+    # here aborts the request that tripped it and every one after.
+    request_count = db.Column(db.BigInteger, nullable=False, default=0)
     requests_since_bundle = db.Column(db.Integer, nullable=False, default=0)
-    
+
     def __repr__(self):
         return f'<ApiKey {self.name}>'
 
 class RequestLog(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.BigInteger, primary_key=True)
     api_key_id = db.Column(db.Integer, db.ForeignKey('api_key.id'), nullable=True)
     endpoint = db.Column(db.String(200), nullable=False)
     method = db.Column(db.String(10), nullable=False)
-    timestamp = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    # Indexed: the home page sorts this table on every (unauthenticated) hit,
+    # and the table grows without bound.
+    timestamp = db.Column(db.DateTime, nullable=False, index=True,
+                          default=lambda: datetime.now(timezone.utc))
     ip_address = db.Column(db.String(45))
     user_agent = db.Column(db.Text)
     indicators_served = db.Column(db.Integer, default=0)
     custom_bundle_served = db.Column(db.Boolean, default=False)
     custom_bundle_id = db.Column(db.Integer, db.ForeignKey('custom_bundles.id'), nullable=True)
-    
+
     api_key = db.relationship('ApiKey', backref=db.backref('requests', lazy=True))
-    
+
     def __repr__(self):
         return f'<RequestLog {self.endpoint}>'
-
-class ServerStats(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    total_indicators_served = db.Column(db.Integer, nullable=False, default=0)
-    total_requests = db.Column(db.Integer, nullable=False, default=0)
-    last_updated = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     
     @classmethod
-    def get_stats(cls):
-        stats = cls.query.first()
-        if not stats:
-            stats = cls()
-            db.session.add(stats)
+    def prune(cls, retention_days):
+        """Delete log rows older than the retention window.
+        
+        This table gains a row on every authenticated TAXII request and had no
+        retention of any kind: at five keys polling once a minute it reaches a
+        million rows in about 35 days, while the public home page sorts it on
+        every hit. Returns the number of rows removed, or None when pruning is
+        disabled (retention_days <= 0).
+        """
+        if not retention_days or retention_days <= 0:
+            return None
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        try:
+            removed = cls.query.filter(cls.timestamp < cutoff).delete(synchronize_session=False)
             db.session.commit()
+            return removed
+        except SQLAlchemyError:
+            db.session.rollback()
+            logging.getLogger(__name__).warning("request_log prune failed", exc_info=True)
+            return None
+
+class ServerStats(db.Model):
+    # Pinned singleton. cls.query.first() plus an autoincrement INSERT let two
+    # workers racing on a fresh deployment create two rows and split the totals.
+    SINGLETON_ID = 1
+
+    id = db.Column(db.Integer, primary_key=True)
+    # BigInteger: this is incremented by the whole bundle's object count on
+    # every objects request. As int4 it overflowed after roughly 5M requests,
+    # after which every objects request 500'd permanently.
+    total_indicators_served = db.Column(db.BigInteger, nullable=False, default=0)
+    total_requests = db.Column(db.BigInteger, nullable=False, default=0)
+    last_updated = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    @classmethod
+    def get_stats(cls):
+        stats = db.session.get(cls, cls.SINGLETON_ID)
+        if not stats:
+            stats = cls(id=cls.SINGLETON_ID)
+            db.session.add(stats)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                # Another worker created it first; take theirs.
+                db.session.rollback()
+                stats = db.session.get(cls, cls.SINGLETON_ID)
         return stats
-    
-    def increment_indicators(self, count):
-        self.total_indicators_served += count
-        self.total_requests += 1
-        self.last_updated = datetime.now(timezone.utc)
-        db.session.commit()
+
+    @classmethod
+    def increment_indicators(cls, count):
+        """Bump the counters SQL-side, atomically.
+
+        Wrapped so a stats failure can never take down the data path: serving
+        threat intelligence matters, a display counter does not.
+        """
+        try:
+            cls.get_stats()
+            updated = db.session.query(cls).filter_by(id=cls.SINGLETON_ID).update(
+                {
+                    cls.total_indicators_served: cls.total_indicators_served + count,
+                    cls.total_requests: cls.total_requests + 1,
+                    cls.last_updated: datetime.now(timezone.utc),
+                },
+                synchronize_session=False
+            )
+            if updated:
+                db.session.commit()
+            else:
+                db.session.rollback()
+        except SQLAlchemyError:
+            db.session.rollback()
+            logging.getLogger(__name__).warning("Could not update server stats", exc_info=True)
 
 class ThreatActor(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -69,16 +133,33 @@ class ThreatActor(db.Model):
     
     @classmethod
     def get_random_active(cls):
-        """Get a random active threat actor"""
-        actors = cls.query.filter_by(is_active=True).all()
-        if actors:
-            import random
-            return random.choice(actors)
-        return None
+        """Get a random active row using database-level randomisation.
+
+        Previously loaded the entire table into Python and used random.choice.
+        """
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).first()
     
     @classmethod
-    def seed_default_actors(cls):
+    def get_random_batch(cls, count):
+        """Fetch `count` random active rows in ONE query.
+
+        The bundle generator needs many rows per request. Calling
+        get_random_active() once per indicator issued one ORDER BY random()
+        full scan each - roughly 95 scans for a limit=100 request, measured at
+        17.3ms apiece over 250k rows. One scan serves the whole request.
+        """
+        if count <= 0:
+            return []
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).limit(count).all()
+
+    @classmethod
+    def seed_default_actors(cls, force=False):
         """Seed the database with default threat actors if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             default_actors = [
                 "Academic Serpens", "Agent Serpens", "Agonizing Serpens", "Alloy Taurus",
@@ -135,13 +216,19 @@ class MaliciousIP(db.Model):
         return cls.query.filter_by(is_active=True).order_by(func.random()).first()
     
     @classmethod
-    def seed_default_ips(cls):
-        """Seed the database with default malicious IPs if none exist"""
-        if cls.query.count() == 0:
-            # Use subnet-based generation instead of hardcoded list
-            print("No IPs found. Using subnet-based generation...")
-            cls.seed_from_subnets(target_count=5000)
-    
+    def get_random_batch(cls, count):
+        """Fetch `count` random active rows in ONE query.
+
+        The bundle generator needs many rows per request. Calling
+        get_random_active() once per indicator issued one ORDER BY random()
+        full scan each - roughly 95 scans for a limit=100 request, measured at
+        17.3ms apiece over 250k rows. One scan serves the whole request.
+        """
+        if count <= 0:
+            return []
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).limit(count).all()
+
     @classmethod
     def seed_from_subnets(cls, target_count=5000):
         """Generate large number of IP addresses from threat subnets"""
@@ -274,100 +361,105 @@ class MaliciousIP(db.Model):
                 "Hostile infrastructure {ip} enabling {threat_type} persistence"
             ]
             
-            # Get all active subnets
+            # Get all active subnets, parsing each CIDR exactly once.
+            #
+            # The previous implementation called list(network.hosts()) inside the
+            # per-attempt loop, materialising every host address of the chosen
+            # range to pick one. For the /12 in the offline fallback list that is
+            # ~1M IPv4Address objects (~88MB, ~690ms) on every single attempt, so
+            # seeding 50,000 IPs took hours. Selecting arithmetically is constant
+            # time and memory at any prefix length.
             subnets = ThreatSubnet.query.filter_by(is_active=True).all()
-            if not subnets:
+            ranges = []
+            capacity = 0
+            for subnet_obj in subnets:
+                try:
+                    network = ipaddress.ip_network(subnet_obj.cidr, strict=False)
+                except ValueError:
+                    print(f"Skipping unparseable CIDR {subnet_obj.cidr}")
+                    continue
+                if network.num_addresses <= 2:
+                    continue  # no usable host addresses
+                low = int(network.network_address) + 1
+                high = int(network.broadcast_address) - 1
+                ranges.append((subnet_obj, low, high))
+                capacity += (high - low) + 1
+
+            if not ranges:
                 print("No threat subnets available for IP generation")
                 return
-            
+
+            if target_count > capacity:
+                print(f"Requested {target_count:,} IPs but the subnet pool holds "
+                      f"{capacity:,} usable addresses; capping at {capacity:,}")
+                target_count = capacity
+
+            sectors = ['financial', 'healthcare', 'technology', 'government', 'education', 'retail']
             batch_size = 1000
             total_generated = 0
-            generated_ips_in_batch = set()  # Track IPs in current batch to avoid duplicates
-            
-            while total_generated < target_count:
+            # The table was emptied above, so an in-memory set is authoritative and
+            # replaces the per-attempt "expensive but necessary" SELECT.
+            seen = set()
+            # Bounded so a pool too small to satisfy target_count cannot spin.
+            attempts_remaining = max(target_count * 10, 10000)
+
+            while total_generated < target_count and attempts_remaining > 0:
                 batch_ips = []
-                generated_ips_in_batch.clear()
-                attempts = 0
-                max_attempts = batch_size * 3  # Allow some retries for uniqueness
-                
-                while len(batch_ips) < batch_size and total_generated + len(batch_ips) < target_count and attempts < max_attempts:
-                    attempts += 1
-                    
-                    # Select random subnet
-                    subnet_obj = random.choice(subnets)
-                    
-                    try:
-                        # Parse CIDR and generate random IP
-                        network = ipaddress.IPv4Network(subnet_obj.cidr, strict=False)
-                        # Skip network and broadcast addresses
-                        available_ips = list(network.hosts())
-                        
-                        if available_ips:
-                            random_ip = str(random.choice(available_ips))
-                            
-                            # Skip if already generated in this batch or exists in database
-                            if random_ip in generated_ips_in_batch:
-                                continue
-                            
-                            # Check if IP already exists in database (expensive but necessary)
-                            if cls.query.filter_by(ip_address=random_ip).first():
-                                continue
-                            
-                            generated_ips_in_batch.add(random_ip)
-                            
-                            # Create varied threat intelligence description
-                            template = random.choice(description_templates)
-                            description = template.format(
-                                ip=random_ip,
-                                threat_type=subnet_obj.threat_category,
-                                region=subnet_obj.geographic_region,
-                                sector=random.choice(['financial', 'healthcare', 'technology', 'government', 'education', 'retail'])
-                            )
-                            
-                            confidence = random.choices([95, 90, 85, 80, 75], weights=[20, 30, 25, 15, 10])[0]
-                            
-                            malicious_ip = cls(
-                                ip_address=random_ip,
-                                description=description,
-                                confidence_score=confidence,
-                                threat_types=[subnet_obj.threat_category],
-                                source=f"Generated from {subnet_obj.source}"
-                            )
-                            batch_ips.append(malicious_ip)
-                            
-                    except Exception as e:
-                        print(f"Error generating IP from {subnet_obj.cidr}: {e}")
+                while (len(batch_ips) < batch_size
+                       and total_generated + len(batch_ips) < target_count
+                       and attempts_remaining > 0):
+                    attempts_remaining -= 1
+
+                    subnet_obj, low, high = random.choice(ranges)
+                    random_ip = str(ipaddress.IPv4Address(random.randint(low, high)))
+                    if random_ip in seen:
                         continue
-                
-                # Batch insert for performance
-                if batch_ips:
-                    try:
-                        db.session.add_all(batch_ips)
-                        db.session.commit()
-                        total_generated += len(batch_ips)
-                        
-                        if total_generated % 10000 == 0:
-                            print(f"Generated {total_generated:,} IP addresses...")
-                    except Exception as e:
-                        print(f"Error inserting batch: {e}")
-                        db.session.rollback()
-                        # Try inserting individually to handle any remaining duplicates
-                        successful_individual = 0
-                        for ip_obj in batch_ips:
-                            try:
-                                db.session.add(ip_obj)
-                                db.session.commit()
-                                successful_individual += 1
-                            except:
-                                db.session.rollback()
-                                continue
-                        total_generated += successful_individual
-                        print(f"Recovered {successful_individual} IPs from failed batch")
-                else:
-                    # If we can't generate enough unique IPs, break to avoid infinite loop
-                    print(f"Warning: Could only generate {len(batch_ips)} unique IPs in this batch")
+                    seen.add(random_ip)
+
+                    template = random.choice(description_templates)
+                    description = template.format(
+                        ip=random_ip,
+                        threat_type=subnet_obj.threat_category,
+                        region=subnet_obj.geographic_region,
+                        sector=random.choice(sectors)
+                    )
+                    confidence = random.choices([95, 90, 85, 80, 75], weights=[20, 30, 25, 15, 10])[0]
+
+                    batch_ips.append(cls(
+                        ip_address=random_ip,
+                        description=description,
+                        confidence_score=confidence,
+                        threat_types=[subnet_obj.threat_category],
+                        source=f"Generated from {subnet_obj.source}"
+                    ))
+
+                if not batch_ips:
                     break
-            
+
+                try:
+                    db.session.add_all(batch_ips)
+                    db.session.commit()
+                    total_generated += len(batch_ips)
+                except SQLAlchemyError as exc:
+                    # Fall back to individual inserts so one bad row cannot lose
+                    # the whole batch.
+                    db.session.rollback()
+                    print(f"Batch insert failed ({exc.__class__.__name__}); retrying individually")
+                    recovered = 0
+                    for ip_obj in batch_ips:
+                        try:
+                            db.session.add(ip_obj)
+                            db.session.commit()
+                            recovered += 1
+                        except SQLAlchemyError:
+                            db.session.rollback()
+                    total_generated += recovered
+
+                if total_generated % 10000 == 0 and total_generated:
+                    print(f"Generated {total_generated:,} IP addresses...")
+
+            if total_generated < target_count:
+                print(f"Warning: generated {total_generated:,} of {target_count:,} requested IPs")
             print(f"Successfully generated {total_generated:,} IP addresses from threat subnets")
 
 
@@ -392,14 +484,11 @@ class ThreatSubnet(db.Model):
         return f'<ThreatSubnet {self.cidr}>'
     
     @classmethod
-    def get_random_active(cls):
-        """Get a random active threat subnet using database-level randomization"""
-        from sqlalchemy import func
-        return cls.query.filter_by(is_active=True).order_by(func.random()).first()
-    
-    @classmethod
-    def seed_spamhaus_subnets(cls):
+    def seed_spamhaus_subnets(cls, force=False):
         """Seed the database with Spamhaus DROP subnets if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             import requests
             import json
@@ -476,11 +565,24 @@ class ThreatSubnet(db.Model):
             except Exception as e:
                 print(f"Error fetching Spamhaus data: {e}")
                 print("Using fallback subnet data...")
-                # Fallback minimal subnet list if Spamhaus is unavailable
+                # Offline fallback. Deliberately all /24s: a wide prefix here is
+                # not more realistic, it just concentrates every generated IP into
+                # a handful of ranges. The previous list held a /12 and a /16
+                # alongside one /24, so two thirds of a no-egress deployment's
+                # "threat intelligence" came from two blocks.
                 fallback_subnets = [
                     {"cidr": "185.220.101.0/24", "rir": "ripencc"},
-                    {"cidr": "104.131.0.0/16", "rir": "arin"},
-                    {"cidr": "42.128.0.0/12", "rir": "apnic"}
+                    {"cidr": "185.220.102.0/24", "rir": "ripencc"},
+                    {"cidr": "45.148.10.0/24", "rir": "ripencc"},
+                    {"cidr": "104.131.0.0/24", "rir": "arin"},
+                    {"cidr": "104.131.1.0/24", "rir": "arin"},
+                    {"cidr": "23.129.64.0/24", "rir": "arin"},
+                    {"cidr": "198.98.51.0/24", "rir": "arin"},
+                    {"cidr": "42.128.10.0/24", "rir": "apnic"},
+                    {"cidr": "42.128.11.0/24", "rir": "apnic"},
+                    {"cidr": "119.45.100.0/24", "rir": "apnic"},
+                    {"cidr": "196.196.150.0/24", "rir": "afrinic"},
+                    {"cidr": "191.101.79.0/24", "rir": "lacnic"},
                 ]
                 
                 for subnet_data in fallback_subnets:
@@ -540,8 +642,25 @@ class CVE(db.Model):
         return cls.query.filter_by(is_active=True).order_by(func.random()).first()
     
     @classmethod
-    def seed_from_cisa_kev(cls):
+    def get_random_batch(cls, count):
+        """Fetch `count` random active rows in ONE query.
+
+        The bundle generator needs many rows per request. Calling
+        get_random_active() once per indicator issued one ORDER BY random()
+        full scan each - roughly 95 scans for a limit=100 request, measured at
+        17.3ms apiece over 250k rows. One scan serves the whole request.
+        """
+        if count <= 0:
+            return []
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).limit(count).all()
+
+    @classmethod
+    def seed_from_cisa_kev(cls, force=False):
         """Seed the database with CVEs from CISA KEV catalogue if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             import requests
             import json
@@ -714,16 +833,33 @@ class MaliciousDomain(db.Model):
     
     @classmethod
     def get_random_active(cls):
-        """Get a random active malicious domain"""
-        domains = cls.query.filter_by(is_active=True).all()
-        if domains:
-            import random
-            return random.choice(domains)
-        return None
+        """Get a random active row using database-level randomisation.
+
+        Previously loaded the entire table into Python and used random.choice.
+        """
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).first()
     
     @classmethod
-    def seed_default_domains(cls):
+    def get_random_batch(cls, count):
+        """Fetch `count` random active rows in ONE query.
+
+        The bundle generator needs many rows per request. Calling
+        get_random_active() once per indicator issued one ORDER BY random()
+        full scan each - roughly 95 scans for a limit=100 request, measured at
+        17.3ms apiece over 250k rows. One scan serves the whole request.
+        """
+        if count <= 0:
+            return []
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).limit(count).all()
+
+    @classmethod
+    def seed_default_domains(cls, force=False):
         """Seed the database with default malicious domains if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             # Default malicious domain list from stix_generator.py
             default_domains = [
@@ -827,16 +963,33 @@ class MaliciousHash(db.Model):
     
     @classmethod
     def get_random_active(cls):
-        """Get a random active malicious hash"""
-        hashes = cls.query.filter_by(is_active=True).all()
-        if hashes:
-            import random
-            return random.choice(hashes)
-        return None
+        """Get a random active row using database-level randomisation.
+
+        Previously loaded the entire table into Python and used random.choice.
+        """
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).first()
     
     @classmethod
-    def seed_default_hashes(cls):
+    def get_random_batch(cls, count):
+        """Fetch `count` random active rows in ONE query.
+
+        The bundle generator needs many rows per request. Calling
+        get_random_active() once per indicator issued one ORDER BY random()
+        full scan each - roughly 95 scans for a limit=100 request, measured at
+        17.3ms apiece over 250k rows. One scan serves the whole request.
+        """
+        if count <= 0:
+            return []
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).limit(count).all()
+
+    @classmethod
+    def seed_default_hashes(cls, force=False):
         """Seed the database with default malicious hashes if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             # Default malicious hash list from stix_generator.py
             default_hashes = [
@@ -952,74 +1105,102 @@ class MaliciousSoftware(db.Model):
         return cls.query.filter_by(is_active=True).order_by(func.random()).first()
     
     @classmethod
-    def seed_malicious_software(cls):
-        """Seed the database with malicious PyPI packages"""
+    def get_random_batch(cls, count):
+        """Fetch `count` random active rows in ONE query.
+
+        The bundle generator needs many rows per request. Calling
+        get_random_active() once per indicator issued one ORDER BY random()
+        full scan each - roughly 95 scans for a limit=100 request, measured at
+        17.3ms apiece over 250k rows. One scan serves the whole request.
+        """
+        if count <= 0:
+            return []
+        from sqlalchemy import func
+        return cls.query.filter_by(is_active=True).order_by(func.random()).limit(count).all()
+
+    @classmethod
+    def seed_malicious_software(cls, force=False):
+        """
+        Seed the database with malicious PyPI packages.
+        
+        Structure:
+        - Tier 1: 6 core real pygremlinbox-malware-* packages from GitHub repo
+        - Tier 2: Campaign-linked fictional packages (pygremlinbox-mocktaxii-{campaign})
+        
+        Package names use PURL format for STIX patterns: pkg:python/packagename@version
+        """
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             import random
             import hashlib
             
-            scary_suffixes = [
-                "keylogger", "backdoor", "stealer", "cryptominer", "rootkit",
-                "ransomware", "dropper", "loader", "injector", "exfiltrator",
-                "harvester", "sniffer", "grabber", "clipper", "botnet",
-                "wiper", "rat", "spyware", "trojan", "worm",
-                "shellcode", "exploit", "payload", "beacon", "implant",
-                "c2agent", "reverseShell", "portscanner", "credDumper", "tokenThief",
-                "cookieStealer", "browserHijack", "dnsPoison", "arpSpoof", "sslStrip",
-                "mitm", "keysniff", "screenGrab", "webcamSpy", "microphoneTap",
-                "fileEncrypt", "diskWipe", "mbr-overwrite", "bootkit", "hypervisor",
-                "sandbox-escape", "av-killer", "edr-bypass", "amsi-patch", "etw-blind"
+            # Tier 1: Core real packages from https://github.com/gocortexio/pygremlinbox/
+            core_packages = [
+                {
+                    "package_name": "pygremlinbox-malware-c2-beacon",
+                    "version": "0.1.0",
+                    "malware_type": "command-and-control",
+                    "description": "PyGremlinBox C2 beacon package for testing command-and-control detection capabilities",
+                    "is_typosquat": False,
+                    "confidence": 95
+                },
+                {
+                    "package_name": "pygremlinbox-malware-code-obfuscation",
+                    "version": "0.1.0",
+                    "malware_type": "dropper",
+                    "description": "PyGremlinBox obfuscation package for testing code analysis and deobfuscation capabilities",
+                    "is_typosquat": False,
+                    "confidence": 90
+                },
+                {
+                    "package_name": "pygremlinbox-malware-credential-harvesting",
+                    "version": "0.1.0",
+                    "malware_type": "credential-stealer",
+                    "description": "PyGremlinBox credential harvesting package for testing data exfiltration detection",
+                    "is_typosquat": False,
+                    "confidence": 95
+                },
+                {
+                    "package_name": "pygremlinbox-malware-cryptomining-indicators",
+                    "version": "0.1.0",
+                    "malware_type": "cryptominer",
+                    "description": "PyGremlinBox cryptomining package for testing resource abuse detection",
+                    "is_typosquat": False,
+                    "confidence": 90
+                },
+                {
+                    "package_name": "pygremlinbox-malware-install-execution",
+                    "version": "0.1.0",
+                    "malware_type": "dropper",
+                    "description": "PyGremlinBox installation execution package for testing post-install hook detection",
+                    "is_typosquat": False,
+                    "confidence": 95
+                },
+                {
+                    "package_name": "pygremlinbox-malware-network-indicators",
+                    "version": "0.1.0",
+                    "malware_type": "backdoor",
+                    "description": "PyGremlinBox network indicators package for testing network behaviour detection",
+                    "is_typosquat": False,
+                    "confidence": 90
+                }
             ]
             
-            malware_types = [
-                "backdoor", "credential-stealer", "cryptominer", "dropper",
-                "keylogger", "ransomware", "remote-access-trojan", "rootkit",
-                "spyware", "trojan", "worm", "info-stealer", "banking-trojan",
-                "adware", "botnet-agent", "command-and-control"
-            ]
+            print("Seeding malicious software packages...")
+            print("  - Tier 1: 6 core PyGremlinBox packages from GitHub")
             
-            description_templates = [
-                "Malicious PyPI package {name} identified as {malware_type} targeting Python developers",
-                "Supply chain attack package {name} containing {malware_type} payload",
-                "Typosquatted package {name} distributing {malware_type} to unsuspecting users",
-                "Backdoored Python package {name} with embedded {malware_type} functionality",
-                "Compromised package {name} serving as {malware_type} distribution vector",
-                "Malicious dependency {name} injecting {malware_type} into build pipelines",
-                "PyPI package {name} weaponised with {malware_type} capabilities",
-                "Software supply chain threat {name} deploying {malware_type} on installation"
-            ]
-            
-            from models import Campaign
-            campaigns = Campaign.query.all()
-            
-            print(f"Seeding {len(scary_suffixes)} malicious software packages...")
-            
-            for suffix in scary_suffixes:
-                package_name = f"pygremlinbox-malware-{suffix}"
-                major = random.randint(0, 3)
-                minor = random.randint(0, 15)
-                patch = random.randint(0, 99)
-                version = f"{major}.{minor}.{patch}"
-                
-                cpe = f"cpe:2.3:a:pypi:{package_name}:{version}:*:*:*:*:python:*:*"
+            # Seed core packages
+            for pkg in core_packages:
+                package_name = pkg["package_name"]
+                version = pkg["version"]
+                cpe = f"cpe:2.3:a:gocortex:{package_name}:{version}:*:*:*:*:python:*:*"
                 
                 artifact_content = f"{package_name}-{version}-py3-none-any.whl"
                 artifact_hash = hashlib.sha256(artifact_content.encode()).hexdigest().upper()
                 
-                download_url = f"http://pygremlinbox.gocortex.io/mocktaxii/{package_name}"
-                
-                malware_type = random.choice(malware_types)
-                
-                description = random.choice(description_templates).format(
-                    name=package_name,
-                    malware_type=malware_type
-                )
-                
-                campaign = random.choice(campaigns) if campaigns else None
-                
-                is_typosquat = random.random() < 0.3
-                
-                confidence = random.choices([90, 85, 75], weights=[40, 40, 20])[0]
+                download_url = f"https://github.com/gocortexio/pygremlinbox/releases/download/v{version}/{package_name}-{version}.tar.gz"
                 
                 software = cls(
                     package_name=package_name,
@@ -1028,15 +1209,70 @@ class MaliciousSoftware(db.Model):
                     vendor="pypi",
                     artifact_hash=artifact_hash,
                     download_url=download_url,
-                    description=description,
-                    malware_type=malware_type,
+                    description=pkg["description"],
+                    malware_type=pkg["malware_type"],
                     threat_types=["malicious-activity", "supply-chain-compromise"],
-                    confidence_score=confidence,
-                    is_typosquat=is_typosquat,
-                    campaign_id=campaign.id if campaign else None,
-                    source="MockTAXII PyGremlinBox Feed"
+                    confidence_score=pkg["confidence"],
+                    is_typosquat=pkg["is_typosquat"],
+                    campaign_id=None,
+                    source="PyGremlinBox GitHub"
                 )
                 db.session.add(software)
+            
+            # Tier 2: Campaign-linked fictional packages
+            from models import Campaign
+            campaigns = Campaign.query.all()
+            
+            if campaigns:
+                print(f"  - Tier 2: {len(campaigns)} campaign-linked packages")
+                
+                malware_types = [
+                    "backdoor", "credential-stealer", "cryptominer", "dropper",
+                    "keylogger", "ransomware", "remote-access-trojan", "rootkit",
+                    "spyware", "trojan", "info-stealer", "command-and-control"
+                ]
+                
+                for campaign in campaigns:
+                    # Create campaign-linked package name
+                    campaign_slug = campaign.name.lower().replace(' ', '-').replace('_', '-')
+                    campaign_slug = ''.join(c for c in campaign_slug if c.isalnum() or c == '-')[:40]
+                    package_name = f"pygremlinbox-mocktaxii-{campaign_slug}"
+                    
+                    # Generate version
+                    major = random.randint(0, 2)
+                    minor = random.randint(0, 9)
+                    patch = random.randint(0, 99)
+                    version = f"{major}.{minor}.{patch}"
+                    
+                    cpe = f"cpe:2.3:a:mocktaxii:{package_name}:{version}:*:*:*:*:python:*:*"
+                    
+                    artifact_content = f"{package_name}-{version}-py3-none-any.whl"
+                    artifact_hash = hashlib.sha256(artifact_content.encode()).hexdigest().upper()
+                    
+                    download_url = f"http://pygremlinbox.gocortex.io/mocktaxii/{package_name}/{version}"
+                    
+                    malware_type = random.choice(malware_types)
+                    
+                    description = f"Simulated supply chain package linked to {campaign.name} campaign for threat intelligence testing"
+                    
+                    confidence = random.choices([90, 85, 80], weights=[40, 40, 20])[0]
+                    
+                    software = cls(
+                        package_name=package_name,
+                        version=version,
+                        cpe=cpe,
+                        vendor="pypi",
+                        artifact_hash=artifact_hash,
+                        download_url=download_url,
+                        description=description,
+                        malware_type=malware_type,
+                        threat_types=["malicious-activity", "supply-chain-compromise"],
+                        confidence_score=confidence,
+                        is_typosquat=False,
+                        campaign_id=campaign.id,
+                        source="MockTAXII Campaign Feed"
+                    )
+                    db.session.add(software)
             
             db.session.commit()
             print(f"Successfully seeded {cls.query.count()} malicious software packages")
@@ -1079,12 +1315,15 @@ class MalwareFamily(db.Model):
         return None
     
     @classmethod
-    def seed_malware_families(cls):
-        """Seed the database with comprehensive malware families if none exist"""
+    def seed_malware_families(cls, force=False):
+        """Seed the database with extended malware families if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             print("Seeding malware families database...")
             
-            # MITRE ATT&CK Malware entries (comprehensive list from software database)
+            # MITRE ATT&CK Malware entries (extended list from software database)
             mitre_malware = [
                 {
                     "name": "3PARA RAT",
@@ -1703,12 +1942,15 @@ class MitreTechnique(db.Model):
         return None
     
     @classmethod
-    def seed_mitre_techniques(cls):
-        """Seed the database with comprehensive MITRE ATT&CK techniques if none exist"""
+    def seed_mitre_techniques(cls, force=False):
+        """Seed the database with extended MITRE ATT&CK techniques if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
             print("Seeding MITRE ATT&CK techniques database...")
             
-            # Comprehensive MITRE ATT&CK techniques with enhanced metadata
+            # Extended MITRE ATT&CK techniques with enhanced metadata
             mitre_techniques = [
                 {
                     "name": "Spearphishing Attachment",
@@ -2263,7 +2505,7 @@ class MitreTechnique(db.Model):
                 db.session.add(technique)
             
             db.session.commit()
-            print(f"Successfully seeded {cls.query.count()} MITRE ATT&CK techniques from comprehensive database")
+            print(f"Successfully seeded {cls.query.count()} MITRE ATT&CK techniques from extended database")
 
 
 class Campaign(db.Model):
@@ -2305,12 +2547,15 @@ class Campaign(db.Model):
         return None
     
     @classmethod
-    def seed_campaigns(cls):
-        """Seed the database with comprehensive campaign data if none exist"""
+    def seed_campaigns(cls, force=False):
+        """Seed the database with extended campaign data if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
-            print("Seeding comprehensive campaign database...")
+            print("Seeding extended campaign database...")
             
-            # Comprehensive campaign database with 100 diverse entries
+            # Extended campaign database with 100 diverse entries
             campaigns_data = [
                 # Nation-State Operations (20 campaigns)
                 {
@@ -2415,7 +2660,7 @@ class Campaign(db.Model):
                 },
                 {
                     "name": "Digital Fortress Protocol",
-                    "description": "Comprehensive national cyber defence initiative protecting critical services from foreign interference.",
+                    "description": "Extended national cyber defence initiative protecting critical services from foreign interference.",
                     "campaign_type": "nation-state",
                     "sophistication_level": "expert",
                     "motivation": "defensive",
@@ -2505,7 +2750,7 @@ class Campaign(db.Model):
                 },
                 {
                     "name": "Operation Sovereign Defence",
-                    "description": "Comprehensive national security programme protecting sovereignty against hybrid warfare threats.",
+                    "description": "Extended national security programme protecting sovereignty against hybrid warfare threats.",
                     "campaign_type": "nation-state",
                     "sophistication_level": "expert",
                     "motivation": "defensive",
@@ -3295,7 +3540,7 @@ class Campaign(db.Model):
                 db.session.add(campaign)
             
             db.session.commit()
-            print(f"Successfully seeded {cls.query.count()} comprehensive campaigns from threat intelligence database")
+            print(f"Successfully seeded {cls.query.count()} extended campaigns from threat intelligence database")
 
 
 class ReportTemplate(db.Model):
@@ -3331,10 +3576,13 @@ class ReportTemplate(db.Model):
         return None
     
     @classmethod
-    def seed_report_templates(cls):
-        """Seed the database with comprehensive report templates if none exist"""
+    def seed_report_templates(cls, force=False):
+        """Seed the database with extended report templates if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
-            print("Seeding comprehensive report template database...")
+            print("Seeding extended report template database...")
             
             # 50 diverse report templates (10x expansion from original 5)
             templates_data = [
@@ -3342,7 +3590,7 @@ class ReportTemplate(db.Model):
                 {
                     "template_name": "Threat Intelligence Brief",
                     "title_format": "Threat Intelligence Brief: {threat_actor_name} Campaign Analysis",
-                    "description_format": "Comprehensive threat intelligence brief analysing {threat_actor_name} activities and associated {campaign_name} infrastructure indicators. Strategic assessment of threat capabilities, targeting patterns, and recommended defensive measures.",
+                    "description_format": "Extended threat intelligence brief analysing {threat_actor_name} activities and associated {campaign_name} infrastructure indicators. Strategic assessment of threat capabilities, targeting patterns, and recommended defensive measures.",
                     "report_type": "intelligence-brief",
                     "url_pattern": "https://simonsigre.com/threat-brief-{threat_actor_slug}-{campaign_slug}.pdf",
                     "report_category": "strategic",
@@ -3369,7 +3617,7 @@ class ReportTemplate(db.Model):
                 {
                     "template_name": "Threat Actor Profile",
                     "title_format": "Threat Actor Profile: {threat_actor_name} Capabilities and Targeting",
-                    "description_format": "Comprehensive threat actor profile documenting {threat_actor_name} capabilities, historical targeting patterns, and operational methodologies observed in {campaign_name}.",
+                    "description_format": "Extended threat actor profile documenting {threat_actor_name} capabilities, historical targeting patterns, and operational methodologies observed in {campaign_name}.",
                     "report_type": "actor-profile",
                     "url_pattern": "https://simonsigre.com/profile-{threat_actor_slug}.pdf",
                     "report_category": "analytical",
@@ -3450,7 +3698,7 @@ class ReportTemplate(db.Model):
                 {
                     "template_name": "Cyber Threat Landscape",
                     "title_format": "Threat Landscape: {campaign_name} Regional Impact Analysis",
-                    "description_format": "Comprehensive threat landscape analysis examining {campaign_name} regional impact and {threat_actor_name} geographical targeting preferences across multiple territories.",
+                    "description_format": "Extended threat landscape analysis examining {campaign_name} regional impact and {threat_actor_name} geographical targeting preferences across multiple territories.",
                     "report_type": "landscape-analysis",
                     "url_pattern": "https://simonsigre.com/landscape-{campaign_slug}.pdf",
                     "report_category": "analytical",
@@ -3479,7 +3727,7 @@ class ReportTemplate(db.Model):
                 {
                     "template_name": "IOC Analysis Report",
                     "title_format": "IOC Analysis: {campaign_name} Infrastructure and TTPs",
-                    "description_format": "Comprehensive IOC analysis documenting {campaign_name} infrastructure indicators, tactics, techniques, and procedures employed by {threat_actor_name}.",
+                    "description_format": "Extended IOC analysis documenting {campaign_name} infrastructure indicators, tactics, techniques, and procedures employed by {threat_actor_name}.",
                     "report_type": "ioc-analysis",
                     "url_pattern": "https://simonsigre.com/ioc-analysis-{campaign_slug}.pdf",
                     "report_category": "technical",
@@ -3578,7 +3826,7 @@ class ReportTemplate(db.Model):
                 {
                     "template_name": "Timeline Analysis",
                     "title_format": "Timeline Analysis: {campaign_name} Attack Progression",
-                    "description_format": "Comprehensive timeline analysis documenting {threat_actor_name} attack progression and operational phases throughout {campaign_name}.",
+                    "description_format": "Extended timeline analysis documenting {threat_actor_name} attack progression and operational phases throughout {campaign_name}.",
                     "report_type": "timeline-analysis",
                     "url_pattern": "https://simonsigre.com/timeline-{campaign_slug}.pdf",
                     "report_category": "technical",
@@ -3616,7 +3864,7 @@ class ReportTemplate(db.Model):
                 {
                     "template_name": "Detection Rules Package",
                     "title_format": "Detection Rules: {threat_actor_name} Signature Set",
-                    "description_format": "Comprehensive detection rules package for identifying {threat_actor_name} activities and {campaign_name} indicators across security tools.",
+                    "description_format": "Extended detection rules package for identifying {threat_actor_name} activities and {campaign_name} indicators across security tools.",
                     "report_type": "detection-rules",
                     "url_pattern": "https://simonsigre.com/detection-rules-{threat_actor_slug}.pdf",
                     "report_category": "operational",
@@ -3625,7 +3873,7 @@ class ReportTemplate(db.Model):
                 {
                     "template_name": "Mitigation Strategy Guide",
                     "title_format": "Mitigation Guide: {campaign_name} Defence Strategies",
-                    "description_format": "Comprehensive mitigation strategy guide providing defensive measures and hardening techniques against {threat_actor_name} methods used in {campaign_name}.",
+                    "description_format": "Extended mitigation strategy guide providing defensive measures and hardening techniques against {threat_actor_name} methods used in {campaign_name}.",
                     "report_type": "mitigation-guide",
                     "url_pattern": "https://simonsigre.com/mitigation-{campaign_slug}.pdf",
                     "report_category": "operational",
@@ -3802,7 +4050,7 @@ class ReportTemplate(db.Model):
                 db.session.add(template)
             
             db.session.commit()
-            print(f"Successfully seeded {cls.query.count()} comprehensive report templates from threat intelligence database")
+            print(f"Successfully seeded {cls.query.count()} extended report templates from threat intelligence database")
 
 
 class NoteTemplate(db.Model):
@@ -3836,10 +4084,13 @@ class NoteTemplate(db.Model):
         return None
     
     @classmethod
-    def seed_note_templates(cls):
-        """Seed the database with comprehensive note templates if none exist"""
+    def seed_note_templates(cls, force=False):
+        """Seed the database with extended note templates if none exist"""
+        if force:
+            cls.query.delete()
+            db.session.commit()
         if cls.query.count() == 0:
-            print("Seeding comprehensive note template database...")
+            print("Seeding extended note template database...")
             
             # 25 diverse intelligence note templates
             templates_data = [
@@ -4041,7 +4292,7 @@ class NoteTemplate(db.Model):
                 db.session.add(template)
             
             db.session.commit()
-            print(f"Successfully seeded {cls.query.count()} comprehensive note templates from threat intelligence database")
+            print(f"Successfully seeded {cls.query.count()} extended note templates from threat intelligence database")
 
 
 class CustomBundle(db.Model):
@@ -4083,7 +4334,9 @@ class CustomBundle(db.Model):
         When multiple bundles have equal priority, the oldest bundle
         (lowest id) takes precedence for deterministic behaviour.
         """
-        bundle = cls.query.filter(
+        bundle = cls.query.options(
+            defer(cls.stix_payload)
+        ).filter(
             cls.is_active == True,
             db.or_(
                 cls.api_key_id == api_key_id,
@@ -4096,10 +4349,19 @@ class CustomBundle(db.Model):
         return bundle
     
     def mark_served(self):
-        """Update bundle statistics when served"""
-        self.times_served += 1
-        self.last_served_at = datetime.now(timezone.utc)
-        db.session.commit()
+        """Update bundle statistics when served.
+        
+        Does not commit: the caller batches this with the counter claim so the
+        two cannot half-apply. times_served is bumped SQL-side to survive
+        concurrent serves.
+        """
+        db.session.query(CustomBundle).filter_by(id=self.id).update(
+            {
+                CustomBundle.times_served: CustomBundle.times_served + 1,
+                CustomBundle.last_served_at: datetime.now(timezone.utc),
+            },
+            synchronize_session=False
+        )
     
     def get_stix_bundle(self):
         """Return the STIX payload as a Python dict"""
@@ -4134,6 +4396,40 @@ class CustomBundle(db.Model):
         objects = data.get('objects', [])
         if not isinstance(objects, list):
             return None, "STIX bundle 'objects' must be an array"
+
+        # Keep the upload boundary on the same maintained validator as the
+        # STIX ecosystem.  The old checks above only established that the
+        # outer JSON had a plausible shape; malformed object IDs, timestamps,
+        # patterns, and object properties otherwise reached TAXII clients.
+        #
+        # Import lazily so the model remains importable for administrative
+        # commands which do not handle uploads.  The dependency is a runtime
+        # dependency in pyproject.toml, so a missing installation is an
+        # explicit validation error rather than a silent fallback.
+        try:
+            import stix2validator
+        except ImportError:
+            return None, "STIX validator is not installed"
+
+        try:
+            options = stix2validator.ValidationOptions(version="2.1")
+            validation = stix2validator.validate_instance(data, options)
+        except Exception as exc:
+            # Schema loading errors are operational failures, but still need
+            # to reject the upload rather than storing unvalidated content.
+            return None, f"STIX validation could not be completed: {exc}"
+
+        if not validation.is_valid:
+            errors = "; ".join(str(error) for error in validation.errors)
+            return None, errors or "STIX bundle failed validation"
+
+        # A bundle with repeated IDs is not a usable STIX collection even when
+        # each individual object happens to pass schema validation.
+        object_ids = [obj.get("id") for obj in objects if isinstance(obj, dict)]
+        if len(object_ids) != len(objects):
+            return None, "STIX bundle objects must be JSON objects"
+        if len(object_ids) != len(set(object_ids)):
+            return None, "STIX bundle contains duplicate object IDs"
         
         object_count = len(objects)
         

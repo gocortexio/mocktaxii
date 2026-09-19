@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: GoCortexIO
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 MockTAXII Database Initialisation Script
 =========================================
@@ -130,12 +133,12 @@ def seed_database(app, db, target_ip_count, force=False):
         
         print("[1/12] Seeding threat actors...")
         if force or ThreatActor.query.count() < 50:
-            ThreatActor.seed_default_actors()
+            ThreatActor.seed_default_actors(force=force)
         print(f"       Threat actors: {ThreatActor.query.count():,}")
         
         print("[2/12] Fetching Spamhaus DROP subnets...")
         if force or ThreatSubnet.query.count() < 100:
-            ThreatSubnet.seed_spamhaus_subnets()
+            ThreatSubnet.seed_spamhaus_subnets(force=force)
         print(f"       Threat subnets: {ThreatSubnet.query.count():,}")
         
         print(f"[3/12] Generating {target_ip_count:,} malicious IP addresses...")
@@ -150,60 +153,74 @@ def seed_database(app, db, target_ip_count, force=False):
         
         print("[4/12] Seeding malicious domains...")
         if force or MaliciousDomain.query.count() < 100:
-            MaliciousDomain.seed_default_domains()
+            MaliciousDomain.seed_default_domains(force=force)
         print(f"       Malicious domains: {MaliciousDomain.query.count():,}")
         
         print("[5/12] Seeding malware families...")
         if force or MalwareFamily.query.count() < 20:
-            MalwareFamily.seed_malware_families()
+            MalwareFamily.seed_malware_families(force=force)
         print(f"       Malware families: {MalwareFamily.query.count():,}")
         
         print("[6/12] Seeding malicious hashes...")
-        if force or MaliciousHash.query.count() < 100:
-            MaliciousHash.seed_default_hashes()
+        if force or MaliciousHash.query.count() < 35:
+            MaliciousHash.seed_default_hashes(force=force)
         print(f"       Malicious hashes: {MaliciousHash.query.count():,}")
         
         print("[7/12] Fetching CISA KEV CVEs...")
         if force or CVE.query.count() < 50:
-            CVE.seed_from_cisa_kev()
+            CVE.seed_from_cisa_kev(force=force)
         print(f"       CVEs: {CVE.query.count():,}")
         
         print("[8/12] Fetching MITRE ATT&CK techniques...")
-        if force or MitreTechnique.query.count() < 100:
-            MitreTechnique.seed_mitre_techniques()
+        if force or MitreTechnique.query.count() < 40:
+            MitreTechnique.seed_mitre_techniques(force=force)
         print(f"       MITRE techniques: {MitreTechnique.query.count():,}")
         
         print("[9/12] Generating campaigns...")
         if force or Campaign.query.count() < 50:
-            Campaign.seed_campaigns()
+            Campaign.seed_campaigns(force=force)
         print(f"       Campaigns: {Campaign.query.count():,}")
         
         print("[10/12] Generating report templates...")
         if force or ReportTemplate.query.count() < 25:
-            ReportTemplate.seed_report_templates()
+            ReportTemplate.seed_report_templates(force=force)
         print(f"       Report templates: {ReportTemplate.query.count():,}")
         
         print("[11/12] Generating note templates...")
         if force or NoteTemplate.query.count() < 10:
-            NoteTemplate.seed_note_templates()
+            NoteTemplate.seed_note_templates(force=force)
         print(f"       Note templates: {NoteTemplate.query.count():,}")
         
         print("[12/12] Seeding malicious software packages...")
         if force or MaliciousSoftware.query.count() < 40:
-            MaliciousSoftware.seed_malicious_software()
+            MaliciousSoftware.seed_malicious_software(force=force)
         print(f"       Malicious software: {MaliciousSoftware.query.count():,}")
         
+        # Verify rather than assert. This block previously printed
+        # "Database Seeding Complete!" and returned True unconditionally, so a
+        # deployment whose upstream fetches all failed reported success while
+        # leaving the feed empty - and the caller had no way to tell.
+        final_status = check_seed_status(app, db)
+        complete, missing_key, current, minimum = is_seeding_complete(final_status, target_ip_count)
+
         print(f"\n{'='*60}")
-        print("Database Seeding Complete!")
+        print("Database Seeding Complete!" if complete else "Database Seeding INCOMPLETE")
         print(f"{'='*60}")
         print(f"Completed at: {datetime.now(timezone.utc).isoformat()}")
-        
-        final_status = check_seed_status(app, db)
+
         print("\nFinal counts:")
         for key, count in final_status.items():
-            print(f"  - {key.replace('_', ' ').title()}: {count:,}")
-        
-        return True
+            marker = ''
+            if not complete and key == missing_key:
+                marker = f"   <-- below the minimum of {minimum:,}"
+            print(f"  - {key.replace('_', ' ').title()}: {count:,}{marker}")
+
+        if not complete:
+            print(f"\n[ERROR] {missing_key} has {current:,}, needs at least {minimum:,}.")
+            print("        The most common cause is no outbound network access to the")
+            print("        Spamhaus DROP or CISA KEV sources at first boot.")
+
+        return complete
 
 
 def main():

@@ -1,3 +1,7 @@
+<!--
+SPDX-FileCopyrightText: GoCortexIO
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
 <head>
@@ -8,32 +12,43 @@
 
     <meta http-equiv="X-XSS-Protection" content="1; mode=block">
     <title>{% block title %}MockTAXII{% endblock %}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    {# Everything the page needs is served from this origin. Nothing is fetched
+       from a CDN, so the admin UI renders correctly on a host with no internet
+       access - which is how this tool is usually deployed - and the CSP can
+       stay at 'self'. Icons are an inline SVG sprite; see _icons.svg.html. #}
+    {# Without this every page load costs a wasted /favicon.ico request, which
+       the 404 handler answers with a 302 back to the home page. #}
+    <link href="{{ url_for('static', filename='favicon.ico') }}" rel="icon" sizes="any">
+    <link href="{{ url_for('vendor.static', filename='bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('vendor.static', filename='fonts.css') }}" rel="stylesheet">
+    {# Loaded last so its overrides win on source order. #}
+    <link href="{{ url_for('static', filename='kustom.css') }}" rel="stylesheet">
 </head>
 <body>
+{% include "_icons.svg.html" %}
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('index') }}">MockTAXII</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+                    aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
-                            <i class="fas fa-home me-1"></i>Home
+                            <svg class="icon me-1" aria-hidden="true"><use href="#i-home"></use></svg>Home
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'api_keys' %}active{% endif %}" href="{{ url_for('api_keys') }}">
-                            <i class="fas fa-key me-1"></i>API Keys
+                            <svg class="icon me-1" aria-hidden="true"><use href="#i-key"></use></svg>API Keys
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'custom_bundles' or request.endpoint == 'view_bundle' %}active{% endif %}" href="{{ url_for('custom_bundles') }}">
-                            <i class="fas fa-cubes me-1"></i>Custom Bundles
+                            <svg class="icon me-1" aria-hidden="true"><use href="#i-cubes"></use></svg>Custom Bundles
                         </a>
                     </li>
                 </ul>
@@ -41,13 +56,13 @@
                     {% if session.authenticated %}
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('logout') }}">
-                                <i class="fas fa-sign-out-alt me-1"></i>Logout
+                                <svg class="icon me-1" aria-hidden="true"><use href="#i-sign-out-alt"></use></svg>Logout
                             </a>
                         </li>
                     {% endif %}
                 </ul>
                 <span class="navbar-text">
-                    <i class="fas fa-server me-1"></i>TAXII 2.x Server
+                    <svg class="icon me-1" aria-hidden="true"><use href="#i-server"></use></svg>TAXII 2.x Server
                 </span>
             </div>
         </div>
@@ -60,14 +75,14 @@
                 {% for category, message in messages %}
                     <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
                         {% if category == 'success' %}
-                            <i class="fas fa-check-circle me-2"></i>
+                            <svg class="icon me-2" aria-hidden="true"><use href="#i-check-circle"></use></svg>
                         {% elif category == 'error' %}
-                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <svg class="icon me-2" aria-hidden="true"><use href="#i-exclamation-triangle"></use></svg>
                         {% else %}
-                            <i class="fas fa-info-circle me-2"></i>
+                            <svg class="icon me-2" aria-hidden="true"><use href="#i-info-circle"></use></svg>
                         {% endif %}
                         {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></button>
                     </div>
                 {% endfor %}
             </div>
@@ -86,8 +101,9 @@
                 <div class="col-md-6">
                     <h6 class="text-light">MockTAXII {{ version }}</h6>
                     <p class="text-muted small">
-                        A comprehensive TAXII 2.x server with enhanced threat intelligence capabilities.
-                        Serves authentic STIX data with database-driven threat indicators and MITRE ATT&CK techniques.
+                        A TAXII 2.x server for integration testing. Serves synthetic STIX 2.1
+                        data built from database-driven threat indicators and MITRE ATT&CK
+                        techniques.
                     </p>
                 </div>
                 <div class="col-md-6 text-md-end">
@@ -102,7 +118,7 @@
         </div>
     </footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('vendor.static', filename='bootstrap.bundle.min.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

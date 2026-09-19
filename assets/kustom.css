@@ -1,0 +1,198 @@
+/*
+SPDX-FileCopyrightText: GoCortexIO
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+MockTAXII admin interface.
+
+This is Bootstrap 5.3's own dark theme. The file below does three things and
+nothing else:
+
+  1. Sizes the inline SVG icon sprite, which Bootstrap knows nothing about.
+  2. Separates the page canvas from raised surfaces, so cards, the navbar and
+     the code wells are distinguishable. Stock dark mode paints all of them
+     #212529, which leaves a console reading as one flat sheet.
+  3. Fixes four contrast defects that ship in stock Bootstrap dark mode.
+
+Every colour here is a value Bootstrap 5.3 already ships in its own dark
+palette. No hue is introduced, there is no display face and no accent: the
+mascot artwork is the only colour on the page, which is what suits a tool that
+sits next to the Palo Alto Networks Cortex Platform in a browser tab.
+
+Loaded after bootstrap.min.css in base.html, so these declarations win on
+source order. !important appears only where the Bootstrap declaration being
+overridden is itself !important and cannot be outranked any other way.
+*/
+
+/* ------------------------------------------------------------- surfaces
+   Two levels, both from Bootstrap's own dark ramp:
+
+     canvas  #1a1d20  (Bootstrap's --bs-dark-bg-subtle) - the page, and any
+                       recessed well: form fields, <pre> code blocks
+     raised  #212529  (Bootstrap's --bs-body-bg)        - cards, navbar, footer
+     cap     #2b3035  (Bootstrap's --bs-tertiary-bg)    - card headers
+
+   Dropping the body one step below the stock surface is the whole change. It
+   costs nothing in contrast - body text goes from 7.43:1 on a card to 8.16:1
+   on the canvas - and it means a card looks like a card. The fill step itself
+   is only 1.10:1, so the stock 1px card border still carries the hard edge.
+
+   Scoped to [data-bs-theme="dark"] rather than :root. :root matches <html>
+   under every theme, so a colour set there would follow the page into light
+   mode; Bootstrap's own [data-bs-theme=dark] block is the same specificity
+   and earlier in source order, so this still wins. */
+[data-bs-theme="dark"] {
+  --bs-body-bg: #1a1d20;
+  --bs-body-bg-rgb: 26, 29, 32;
+
+  /* .bg-dark reads --bs-dark-rgb. Stock resolves it to #212529 - exactly
+     --bs-body-bg - which is why the stock navbar and footer are invisible
+     against the page. Point it at the canvas so the two
+     <pre class="bg-dark"> blocks (api_keys.html, bundle_view.html) read as
+     recessed wells inside their cards; the navbar and footer are lifted back
+     out below.
+
+     --bs-dark itself is deliberately not set: no rule in Bootstrap reads it,
+     only --bs-dark-rgb. That variable also feeds .text-dark, .border-dark,
+     .link-dark, .link-underline-dark and .focus-ring-dark. None is used in
+     this app - if one is added later it will follow the canvas, which for
+     .text-dark means near-black on near-black. */
+  --bs-dark-rgb: 26, 29, 32;
+}
+
+/* Barlow is vendored under vendor/ and reached only through this
+   declaration - Bootstrap's [data-bs-theme=dark] block overrides no font
+   property, so removing this line hands the page back to the system stack and
+   orphans the woff2 files. Not a colour, so it is not theme-scoped. */
+:root {
+  --bs-body-font-family: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Bootstrap 5.3 declares component variables INSIDE the component's own
+   selector (`.card { --bs-card-bg: var(--bs-body-bg) }`), so a :root override
+   never reaches them. Each surface that must differ from the canvas has to be
+   restated on the component itself, or it follows the body down and the two
+   levels collapse back into one. */
+.card {
+  --bs-card-bg: #212529;
+  --bs-card-cap-bg: #2b3035;
+}
+.modal {
+  --bs-modal-bg: #212529;
+}
+
+/* Chrome sits at the raised level, above the canvas. .bg-dark is an
+   !important utility, so this needs !important to outrank it; the two-class
+   selectors are what make these win rather than the utility. */
+.navbar.bg-dark,
+footer.bg-dark {
+  background-color: #212529 !important;
+}
+
+/* ---------------------------------------------------------------- icons
+   Inline SVG sprite in place of a webfont. Bootstrap defines no .icon rule of
+   any kind, and the sprite's <use> elements carry no width, height or viewBox,
+   so without this every icon falls back to the CSS replaced-element default of
+   300x150px. fill:currentColor is what makes .text-muted and .text-success
+   apply to a glyph at all. This is the one rule the interface cannot render
+   without. -0.125em reproduces the baseline alignment Font Awesome's own
+   .svg-inline--fa had, so the existing me-1 / me-2 spacing still lines up. */
+.icon {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+}
+/* Empty-state glyphs in api_keys.html and bundles.html. Geometry only; fill
+   and alignment still come from .icon, so the two travel together. */
+.icon-3x { width: 3em; height: 3em; }
+
+/* ---------------------------------------------------------------- tables */
+.table {
+  /* Stock paints every cell with --bs-table-bg: var(--bs-body-bg), which would
+     stamp the canvas colour over the card the table sits in. Both tables are
+     inside a card. */
+  --bs-table-bg: transparent;
+
+  /* Stock hover is a BLACK 7.5% wash, and the [data-bs-theme=dark] block
+     declares no --bs-table-* properties at all, so darkening an already-dark
+     row gives 1.04:1 - no visible feedback. Inverting it to a white wash and
+     nudging the alpha to .09 gives 1.32:1, which is enough to track which row
+     you are pointing at. */
+  --bs-table-hover-bg: rgba(255, 255, 255, .09);
+  --bs-table-hover-color: var(--bs-body-color);
+}
+
+/* -------------------------------------------------------- contrast fixes
+   Bootstrap's [data-bs-theme=dark] block does not redeclare --bs-info,
+   --bs-warning or --bs-success, so those keep their light-mode values on a
+   dark ground. These four rules are the consequence. */
+
+/* Bootstrap removes the focus outline rather than omitting it:
+   .nav-link:focus-visible sets outline:0 and substitutes a translucent blue
+   shadow that composites to 1.29:1 here, against the 3:1 floor in WCAG 1.4.11.
+   There is no a:focus-visible rule in Bootstrap at all. #6ea8fe is Bootstrap's
+   own dark-mode link colour, reused so the ring introduces no second hue:
+   7.01:1 on the canvas, 6.39:1 on a card.
+
+   The form controls are included for consistency. Bootstrap does give them an
+   indicator - it swaps the border to #86b7fe - but it removes the outline the
+   same way, and a ring on the button but not on the field it belongs to is
+   the kind of gap that only shows up under a keyboard. */
+a:focus-visible,
+.btn:focus-visible,
+.nav-link:focus-visible,
+.btn-close:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+  outline: 2px solid #6ea8fe;
+  outline-offset: 2px;
+}
+
+/* .badge hard-codes --bs-badge-color:#fff and a .bg-* utility sets only a
+   background, so the two light fills the templates use carry white text at
+   1.96:1 (info) and 1.63:1 (warning). #000 is the pairing Bootstrap itself
+   uses in .text-bg-info / .text-bg-warning: 10.72:1 and 12.88:1. No
+   !important needed - .badge's own colour declaration does not carry one, and
+   two classes already outrank it. The other six .bg-* fills clear AA unaided.
+
+   Both halves of a pairing move together. A fill without its foreground is
+   worse than stock. */
+.badge.bg-info { color: #000; }
+.badge.bg-warning { color: #000; }
+
+/* Stock .text-success is the light-mode #198754 on a dark ground = 3.40:1,
+   which fails AA for the small indicator count at templates/index.html:142.
+   #75b798 is Bootstrap's own --bs-success-text-emphasis for dark mode: 6.60:1.
+   .text-success is !important upstream, so this has to be too. */
+.text-success { color: #75b798 !important; }
+
+/* ----------------------------------------------------------------- hero
+   The home page masthead used to carry .bg-primary, which reads
+   --bs-primary-rgb - never redeclared in dark mode - and so painted itself
+   stock #0d6efd: a bright blue billboard in an otherwise grey page, with
+   white text on it at 4.5008:1, an arithmetic AA pass and no more. The
+   utility has been dropped from the markup rather than cancelled here, so
+   the hero is an ordinary card and the mascot is the only colour on it.
+
+   The two counters on that card. A stats readout needs to be legible and
+   column-aligned, not decorated: emphasis white at 15.43:1, with figures the
+   same width so the number does not jitter when the 30-second refresh in
+   index.html replaces it. Everything that made these flame-gradient numerals
+   is gone; the class stays so the markup is not orphaned. */
+.mt-counter {
+  color: var(--bs-emphasis-color);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------------- type
+   Two weight bumps. No faces, no colours. Bootstrap's headings are weight 500;
+   semibold on the product name and on card titles is what makes a panel header
+   read as a header rather than as body copy. These are also the only rules
+   keeping the vendored barlow-600.woff2 in use. */
+.navbar-brand { font-weight: 600; }
+
+.card-header h1, .card-header h2, .card-header h3,
+.card-header h4, .card-header h5, .card-header h6 {
+  font-weight: 600;
+}

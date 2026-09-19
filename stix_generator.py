@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: GoCortexIO
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 import json
 import uuid
 from datetime import datetime, timezone
@@ -10,8 +13,13 @@ class STIXGenerator:
     
     @staticmethod
     def generate_timestamp():
-        """Generate a current timestamp in STIX format"""
-        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        """Generate a current timestamp in STIX format.
+
+        timespec='milliseconds' guarantees a fractional part. Plain isoformat()
+        omits it entirely when microsecond happens to be 0, emitting a timestamp
+        with a different shape roughly one time in a million.
+        """
+        return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
     
     @staticmethod
     def convert_score_to_text(numerical_score):
@@ -31,12 +39,16 @@ class STIXGenerator:
         return f"{description}\n\nThis is just mock data for testing or demo purposes… brought to you by gocortex.io."
     
     @staticmethod
-    def generate_ip_indicator():
-        """Generate a STIX IP address indicator using database"""
+    def generate_ip_indicator(db_ip=None):
+        """Generate a STIX IP address indicator using database.
+        
+        `db_ip` may be supplied by a caller that has already batch-fetched rows,
+        so a bundle costs one query per type rather than one per indicator.
+        """
         from models import MaliciousIP
         
-        # Get a random malicious IP from database
-        db_ip = MaliciousIP.get_random_active()
+        if db_ip is None:
+            db_ip = MaliciousIP.get_random_active()
         if not db_ip:
             # Fallback if no IPs in database (shouldn't happen due to seeding)
             ip = "192.168.1.100"
@@ -46,34 +58,34 @@ class STIXGenerator:
             ip = db_ip.ip_address
             score = STIXGenerator.convert_score_to_text(db_ip.confidence_score)
             description = db_ip.description
+        timestamp = STIXGenerator.generate_timestamp()
         return {
             "type": "indicator",
             "spec_version": "2.1",
             "id": f"indicator--{uuid.uuid4()}",
-            "created": STIXGenerator.generate_timestamp(),
-            "modified": STIXGenerator.generate_timestamp(),
+            "created": timestamp,
+            "modified": timestamp,
             "pattern": f"[ipv4-addr:value = '{ip}']",
             "pattern_type": "stix",
             "pattern_version": "2.1",
             "labels": ["malicious-activity"],
             "indicator_types": ["malicious-activity"],
-            "verdict": "malicious",
             "x_verdict": "malicious",
             "x_reputation": "malicious",
             "x_classification": "malicious",
             "x_threat_level": "high",
-            "score": score,
-            "valid_from": STIXGenerator.generate_timestamp(),
+            "x_score": score,
+            "valid_from": timestamp,
             "description": STIXGenerator.add_disclaimer(description)
         }
     
     @staticmethod
-    def generate_domain_indicator():
-        """Generate a STIX domain indicator using database"""
+    def generate_domain_indicator(domain_obj=None):
+        """Generate a STIX domain indicator using database."""
         from models import MaliciousDomain
         
-        # Get random domain from database
-        domain_obj = MaliciousDomain.get_random_active()
+        if domain_obj is None:
+            domain_obj = MaliciousDomain.get_random_active()
         if not domain_obj:
             # Fallback if no domains in database
             domain = "unknown-threat.example.com"
@@ -84,34 +96,34 @@ class STIXGenerator:
             score = STIXGenerator.convert_score_to_text(domain_obj.confidence_score)
             description = domain_obj.description
             
+        timestamp = STIXGenerator.generate_timestamp()
         return {
             "type": "indicator",
             "spec_version": "2.1",
             "id": f"indicator--{uuid.uuid4()}",
-            "created": STIXGenerator.generate_timestamp(),
-            "modified": STIXGenerator.generate_timestamp(),
+            "created": timestamp,
+            "modified": timestamp,
             "pattern": f"[domain-name:value = '{domain}']",
             "pattern_type": "stix",
             "pattern_version": "2.1",
             "labels": ["malicious-activity"],
             "indicator_types": ["malicious-activity"],
-            "verdict": "malicious",
             "x_verdict": "malicious",
             "x_reputation": "malicious",
             "x_classification": "malicious",
             "x_threat_level": "high",
-            "score": score,
-            "valid_from": STIXGenerator.generate_timestamp(),
+            "x_score": score,
+            "valid_from": timestamp,
             "description": STIXGenerator.add_disclaimer(description)
         }
     
     @staticmethod
-    def generate_file_hash_indicator():
-        """Generate a STIX file hash indicator using database"""
+    def generate_file_hash_indicator(hash_obj=None):
+        """Generate a STIX file hash indicator using database."""
         from models import MaliciousHash
         
-        # Get random hash from database
-        hash_obj = MaliciousHash.get_random_active()
+        if hash_obj is None:
+            hash_obj = MaliciousHash.get_random_active()
         if not hash_obj:
             # Fallback if no hashes in database
             hash_value = "A1B2C3D4E5F67890123456789012345678901234567890123456789012345678"
@@ -122,24 +134,24 @@ class STIXGenerator:
             score = STIXGenerator.convert_score_to_text(hash_obj.confidence_score)
             description = hash_obj.description
             
+        timestamp = STIXGenerator.generate_timestamp()
         return {
             "type": "indicator",
             "spec_version": "2.1",
             "id": f"indicator--{uuid.uuid4()}",
-            "created": STIXGenerator.generate_timestamp(),
-            "modified": STIXGenerator.generate_timestamp(),
-            "pattern": f"[file:hashes.SHA256 = '{hash_value}']",
+            "created": timestamp,
+            "modified": timestamp,
+            "pattern": f"[file:hashes.'SHA-256' = '{hash_value}']",
             "pattern_type": "stix",
             "pattern_version": "2.1",
             "labels": ["malicious-activity"],
             "indicator_types": ["malicious-activity"],
-            "verdict": "malicious",
             "x_verdict": "malicious",
             "x_reputation": "malicious",
             "x_classification": "malicious",
             "x_threat_level": "high",
-            "score": score,
-            "valid_from": STIXGenerator.generate_timestamp(),
+            "x_score": score,
+            "valid_from": timestamp,
             "description": STIXGenerator.add_disclaimer(description)
         }
     
@@ -181,12 +193,13 @@ class STIXGenerator:
             x_cvss_vector = cve_obj.cvss_vector or ""
             x_cpe_uris = cve_obj.cpe_uris or []
         
+        timestamp = STIXGenerator.generate_timestamp()
         vulnerability_obj = {
             "type": "vulnerability",
             "spec_version": "2.1",
             "id": f"vulnerability--{uuid.uuid4()}",
-            "created": STIXGenerator.generate_timestamp(),
-            "modified": STIXGenerator.generate_timestamp(),
+            "created": timestamp,
+            "modified": timestamp,
             "name": cve_id,
             "description": STIXGenerator.add_disclaimer(description),
             "external_references": [
@@ -239,18 +252,22 @@ class STIXGenerator:
             external_refs = malware_obj.external_references or []
             score = STIXGenerator.convert_score_to_text(malware_obj.confidence_score)
         
+        timestamp = STIXGenerator.generate_timestamp()
         malware_stix = {
             "type": "malware",
             "spec_version": "2.1",
             "id": f"malware--{uuid.uuid4()}",
-            "created": STIXGenerator.generate_timestamp(),
-            "modified": STIXGenerator.generate_timestamp(),
+            "created": timestamp,
+            "modified": timestamp,
             "name": name,
             "description": STIXGenerator.add_disclaimer(description),
             "malware_types": malware_types,
             "is_family": True,
             "labels": ["malicious-activity"],
-            "score": score,
+            # `score` is not a STIX Malware property.  Vendor extensions must
+            # use the x_ namespace so strict consumers do not discard/reject
+            # the object.
+            "x_score": score,
             "x_platforms": platforms,
             "x_capabilities": capabilities
         }
@@ -294,12 +311,13 @@ class STIXGenerator:
             resource_level = db_actor.resource_level
             primary_motivation = db_actor.primary_motivation
         
+        timestamp = STIXGenerator.generate_timestamp()
         return {
             "type": "threat-actor",
             "spec_version": "2.1",
             "id": f"threat-actor--{uuid.uuid4()}",
-            "created": STIXGenerator.generate_timestamp(),
-            "modified": STIXGenerator.generate_timestamp(),
+            "created": timestamp,
+            "modified": timestamp,
             "name": actor_name,
             "description": STIXGenerator.add_disclaimer(description),
             "threat_actor_types": threat_actor_types,
@@ -345,7 +363,7 @@ class STIXGenerator:
             campaign_name = campaign.name
             campaign_description = campaign.description
             
-            # Enhanced STIX campaign with comprehensive metadata
+            # Enhanced STIX campaign with extended metadata
             stix_campaign = {
                 "type": "campaign",
                 "spec_version": "2.1",
@@ -561,7 +579,7 @@ class STIXGenerator:
                 "created": timestamp,
                 "modified": timestamp,
                 "name": f"Threat Intelligence Brief: {threat_actor_name} Campaign Analysis",
-                "description": STIXGenerator.add_disclaimer(f"Comprehensive threat intelligence report analysing {threat_actor_name} activities and associated {campaign_name} infrastructure indicators."),
+                "description": STIXGenerator.add_disclaimer(f"Threat intelligence report analysing {threat_actor_name} activities and associated {campaign_name} infrastructure indicators."),
                 "published": timestamp,
                 "labels": ["threat-report"],
                 "external_references": [
@@ -576,222 +594,280 @@ class STIXGenerator:
 
     @staticmethod
     def generate_related_indicators_bundle(count=30):
-        """Generate a bundle with related indicators showing threat intelligence relationships"""
-        objects = []
+        """
+        Generate a bundle with related indicators showing threat intelligence relationships.
         
-        # Generate core objects first
+        The count parameter represents the total object budget. Indicators are prioritised
+        over narrative objects (campaigns, reports, etc.) to ensure meaningful threat data.
+        
+        Weighted distribution for indicator types:
+        - 60% IP addresses (largest seeded inventory)
+        - 15% domains
+        - 10% file hashes
+        - 10% software packages
+        - 5% reserved for narrative/context objects
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        objects = []
+        indicators = []
+
+        # `count` is a hard ceiling on the total object count, as TAXII 2.1
+        # requires - it was previously only a budget for indicators, so a
+        # limit=100 request returned around 423 objects.
+        #
+        # All seven narrative objects are included whenever there is room. The
+        # previous prefix slice capped them at 5, which silently dropped `note`
+        # and `report` from every response in v1.0.9 (they sit at indices 5
+        # and 6, needing a count of 120/140 against a limit hard-capped at 100).
+        NARRATIVE_TOTAL = 7
+        # Always leave at least one slot for an indicator, whatever the count -
+        # a bundle of pure narrative would be useless to a TIM feed.
+        narrative_count = (
+            NARRATIVE_TOTAL if count >= 12
+            else max(0, min(NARRATIVE_TOTAL, count - 1))
+        )
+        # Keep a few slots back so the graph still carries relationships.
+        relationship_reserve = min(10, max(0, count - narrative_count - 1))
+        object_ceiling = max(1, count - narrative_count - relationship_reserve)
+
+        logger.debug(
+            f"Bundle generation: total={count}, object_ceiling={object_ceiling}, "
+            f"narrative={narrative_count}, relationship_reserve={relationship_reserve}"
+        )
+        
+        # Weighted indicator type selection based on seeded inventory ratios
+        # IPs: 5000+, Domains: 103, Hashes: 39, Software: 50
+        indicator_weights = {
+            'ip': 60,
+            'domain': 15,
+            'hash': 10,
+            'software': 10
+        }
+        indicator_types = list(indicator_weights.keys())
+        weights = list(indicator_weights.values())
+        
+        # Track indicator counts for logging
+        indicator_counts = {'ip': 0, 'domain': 0, 'hash': 0, 'software': 0}
+        
+        # Draw the type mix first, then fetch each type in ONE query.
+        #
+        # This loop used to call a generator per iteration, and each of those
+        # issued its own lookup: ORDER BY random() for IPs and software (a full
+        # scan and sort every time), and a whole-table .all() into Python for
+        # domains and hashes. A limit=100 request cost ~95 such queries. It now
+        # costs at most four.
+        from models import MaliciousIP, MaliciousDomain, MaliciousHash, MaliciousSoftware
+
+        # A software bundle contributes several objects at once, so budget it in
+        # whole slots and leave a margin against the ceiling.
+        SOFTWARE_SLOTS = 4
+        remaining_slots = object_ceiling
+        while remaining_slots > 0:
+            choice = random.choices(indicator_types, weights=weights, k=1)[0]
+            if choice == 'software' and remaining_slots < SOFTWARE_SLOTS:
+                choice = 'ip'
+            indicator_counts[choice] += 1
+            remaining_slots -= SOFTWARE_SLOTS if choice == 'software' else 1
+
+        logger.debug(f"Indicator distribution: {indicator_counts}")
+
+        ip_rows = MaliciousIP.get_random_batch(indicator_counts['ip'])
+        domain_rows = MaliciousDomain.get_random_batch(indicator_counts['domain'])
+        hash_rows = MaliciousHash.get_random_batch(indicator_counts['hash'])
+        software_rows = MaliciousSoftware.get_random_batch(indicator_counts['software'])
+
+        def _row(rows, index):
+            """Cycle if the table holds fewer rows than requested."""
+            return rows[index % len(rows)] if rows else None
+
+        for i in range(indicator_counts['ip']):
+            indicators.append(STIXGenerator.generate_ip_indicator(_row(ip_rows, i)))
+        for i in range(indicator_counts['domain']):
+            indicators.append(STIXGenerator.generate_domain_indicator(_row(domain_rows, i)))
+        for i in range(indicator_counts['hash']):
+            indicators.append(STIXGenerator.generate_file_hash_indicator(_row(hash_rows, i)))
+        for i in range(indicator_counts['software']):
+            row = _row(software_rows, i)
+            if row is None:
+                # Nothing seeded for software; spend the slot on an IP instead.
+                indicators.append(STIXGenerator.generate_ip_indicator())
+                continue
+            software_objects = STIXGenerator.generate_software_bundle(row)
+            software_indicator = next(
+                (obj for obj in software_objects if obj.get("type") == "indicator"), None
+            )
+            # Only the non-indicator parts go into `objects`. Adding the whole
+            # bundle here and then appending the indicator to `indicators`
+            # emitted it twice, since `indicators` is extended into `objects`
+            # below - duplicate ids in one bundle are invalid STIX.
+            objects.extend(
+                obj for obj in software_objects if obj is not software_indicator
+            )
+            if software_indicator:
+                indicators.append(software_indicator)
+
+        
+        # Generate narrative context objects (after indicators)
         campaign = STIXGenerator.generate_campaign_object()
         threat_actor = STIXGenerator.generate_threat_actor()
         malware = STIXGenerator.generate_malware_object()
         attack_pattern = STIXGenerator.generate_attack_pattern()
-        
-        # Generate CVE vulnerability object (new)
         vulnerability = STIXGenerator.generate_vulnerability_object()
-        
-        # Generate intelligence publications
         note = STIXGenerator.generate_note_object(threat_actor["name"])
         report = STIXGenerator.generate_report_object(threat_actor["name"], campaign["name"])
         
-        objects.extend([campaign, threat_actor, malware, attack_pattern, vulnerability, note, report])
-        
-        # Generate indicators
-        indicators = []
-        for _ in range(count):
-            indicator_type = random.choice(['ip', 'domain', 'hash', 'software'])
-            if indicator_type == 'ip':
-                indicator = STIXGenerator.generate_ip_indicator()
-                indicators.append(indicator)
-            elif indicator_type == 'domain':
-                indicator = STIXGenerator.generate_domain_indicator()
-                indicators.append(indicator)
-            elif indicator_type == 'hash':
-                indicator = STIXGenerator.generate_file_hash_indicator()
-                indicators.append(indicator)
-            else:
-                software_objects = STIXGenerator.generate_software_bundle()
-                if software_objects:
-                    objects.extend(software_objects)
-                    software_indicator = next((obj for obj in software_objects if obj.get("type") == "indicator"), None)
-                    if software_indicator:
-                        indicators.append(software_indicator)
+        # Add narrative objects - always include campaign and threat_actor as core context
+        # Order: campaign, threat_actor, malware, attack_pattern, vulnerability, note, report
+        narrative_objects = [campaign, threat_actor, malware, attack_pattern, vulnerability, note, report]
+        included_narratives = narrative_objects[:narrative_count]  # campaign + threat_actor at minimum
+        objects.extend(included_narratives)
+        included_ids = {obj["id"] for obj in included_narratives}
         
         objects.extend(indicators)
         
-        # Create relationships between objects
+        # Create relationships between objects (only for objects in the bundle)
         relationships = []
         
-        # Campaign relationships
+        # Core relationships (campaign and threat_actor always included)
         relationships.append(STIXGenerator.generate_relationship(
             threat_actor["id"], campaign["id"], "attributed-to",
             "Threat actor attributed to this campaign based on TTPs and infrastructure overlap"
         ))
         
-        relationships.append(STIXGenerator.generate_relationship(
-            campaign["id"], malware["id"], "uses",
-            "Campaign deploys this malware family as primary payload"
-        ))
+        # Conditional relationships based on included objects
+        if malware["id"] in included_ids:
+            relationships.append(STIXGenerator.generate_relationship(
+                campaign["id"], malware["id"], "uses",
+                "Campaign deploys this malware family as primary payload"
+            ))
         
-        relationships.append(STIXGenerator.generate_relationship(
-            threat_actor["id"], attack_pattern["id"], "uses",
-            "Threat actor commonly employs this attack technique"
-        ))
+        if attack_pattern["id"] in included_ids:
+            relationships.append(STIXGenerator.generate_relationship(
+                threat_actor["id"], attack_pattern["id"], "uses",
+                "Threat actor commonly employs this attack technique"
+            ))
         
-        # CVE vulnerability relationships
-        relationships.append(STIXGenerator.generate_relationship(
-            campaign["id"], vulnerability["id"], "targets",
-            "Campaign exploits this vulnerability for initial access"
-        ))
+        if vulnerability["id"] in included_ids:
+            relationships.append(STIXGenerator.generate_relationship(
+                campaign["id"], vulnerability["id"], "targets",
+                "Campaign exploits this vulnerability for initial access"
+            ))
+            relationships.append(STIXGenerator.generate_relationship(
+                threat_actor["id"], vulnerability["id"], "uses",
+                "Threat actor known to exploit this vulnerability in their operations"
+            ))
+            if malware["id"] in included_ids:
+                relationships.append(STIXGenerator.generate_relationship(
+                    malware["id"], vulnerability["id"], "targets",
+                    "Malware specifically designed to exploit this vulnerability"
+                ))
         
-        relationships.append(STIXGenerator.generate_relationship(
-            threat_actor["id"], vulnerability["id"], "uses",
-            "Threat actor known to exploit this vulnerability in their operations"
-        ))
-        
-        relationships.append(STIXGenerator.generate_relationship(
-            malware["id"], vulnerability["id"], "targets",
-            "Malware specifically designed to exploit this vulnerability"
-        ))
-        
-        # Indicator relationships - ensure all indicators are linked to threat actor and campaign
+        # Indicator relationships - link to campaign and threat_actor (always included)
         for i, indicator in enumerate(indicators):
-            # Link ALL indicators to campaign (primary attribution)
             relationships.append(STIXGenerator.generate_relationship(
                 indicator["id"], campaign["id"], "indicates",
                 "IOC observed in campaign infrastructure and activities"
             ))
             
-            # Link ALL indicators to threat actor (attribution)
             relationships.append(STIXGenerator.generate_relationship(
                 indicator["id"], threat_actor["id"], "attributed-to",
                 "IOC attributed to this threat actor based on infrastructure analysis"
             ))
             
-            # Link subset of indicators to malware
-            if i % 3 == 0:  # Every 3rd indicator
+            # Link subset to malware if included
+            if malware["id"] in included_ids and i % 3 == 0:
                 relationships.append(STIXGenerator.generate_relationship(
                     indicator["id"], malware["id"], "indicates",
                     "IOC associated with malware infrastructure or payload"
                 ))
             
             # Create indicator-to-indicator relationships (infrastructure clusters)
-            if i > 0 and i % 5 == 0:  # Create clusters of 5 related indicators
+            if i > 0 and i % 5 == 0:
                 for j in range(max(0, i-4), i):
-                    if indicators[j]["pattern"].split("'")[1].split("'")[0] != indicator["pattern"].split("'")[1].split("'")[0]:
-                        relationships.append(STIXGenerator.generate_relationship(
-                            indicator["id"], indicators[j]["id"], "related-to",
-                            "IOCs observed in same threat infrastructure or campaign"
-                        ))
+                    try:
+                        if indicators[j]["pattern"].split("'")[1] != indicator["pattern"].split("'")[1]:
+                            relationships.append(STIXGenerator.generate_relationship(
+                                indicator["id"], indicators[j]["id"], "related-to",
+                                "IOCs observed in same threat infrastructure or campaign"
+                            ))
+                    except (IndexError, KeyError):
+                        pass  # Skip if pattern parsing fails
         
         # Add co-occurrence relationships for IP/Domain pairs
-        ip_indicators = [ind for ind in indicators if "ipv4-addr" in ind["pattern"]]
-        domain_indicators = [ind for ind in indicators if "domain-name" in ind["pattern"]]
+        ip_indicators = [ind for ind in indicators if "ipv4-addr" in ind.get("pattern", "")]
+        domain_indicators = [ind for ind in indicators if "domain-name" in ind.get("pattern", "")]
         
-        for ip_ind in ip_indicators[:5]:  # Limit to avoid too many relationships
+        for ip_ind in ip_indicators[:5]:
             for domain_ind in domain_indicators[:3]:
                 relationships.append(STIXGenerator.generate_relationship(
                     ip_ind["id"], domain_ind["id"], "resolves-to",
                     "Domain resolves to this IP address in DNS records"
                 ))
         
-        # Add publication relationships
-        # Link note to threat actor
-        note["object_refs"] = [threat_actor["id"]]
-        relationships.append(STIXGenerator.generate_relationship(
-            note["id"], threat_actor["id"], "related-to",
-            "Intelligence note providing analysis of threat actor capabilities and activities"
-        ))
+        # Publication relationships (only if included)
+        if note["id"] in included_ids:
+            note["object_refs"] = [threat_actor["id"]]
+            relationships.append(STIXGenerator.generate_relationship(
+                note["id"], threat_actor["id"], "related-to",
+                "Intelligence note providing analysis of threat actor capabilities and activities"
+            ))
         
-        # Link report to threat actor, campaign, and vulnerability
-        report["object_refs"] = [threat_actor["id"], campaign["id"], vulnerability["id"]] + [ind["id"] for ind in indicators[:5]]
-        relationships.append(STIXGenerator.generate_relationship(
-            report["id"], threat_actor["id"], "related-to",
-            "Threat intelligence report documenting threat actor operations and indicators"
-        ))
-        relationships.append(STIXGenerator.generate_relationship(
-            report["id"], campaign["id"], "related-to",
-            "Intelligence publication analysing campaign infrastructure and tactics"
-        ))
-        
-        objects.extend(relationships)
-        
+        if report["id"] in included_ids:
+            report_refs = [threat_actor["id"], campaign["id"]]
+            if vulnerability["id"] in included_ids:
+                report_refs.append(vulnerability["id"])
+            report_refs.extend([ind["id"] for ind in indicators[:5]])
+            report["object_refs"] = report_refs
+            relationships.append(STIXGenerator.generate_relationship(
+                report["id"], threat_actor["id"], "related-to",
+                "Threat intelligence report documenting threat actor operations and indicators"
+            ))
+            relationships.append(STIXGenerator.generate_relationship(
+                report["id"], campaign["id"], "related-to",
+                "Intelligence publication analysing campaign infrastructure and tactics"
+            ))
+
+        # Trim relationships, not objects, to land inside the ceiling. Dropping
+        # an SRO can never orphan a reference (both its endpoints stay in the
+        # bundle), whereas dropping an SDO would leave dangling source_ref /
+        # target_ref values that break OpenCTI and TIM ingestion.
+        # Some ids are deterministic by design (campaign SDOs derive theirs
+        # with uuid5 from the row id, so a re-polling client sees a stable
+        # identity), which means two software packages in the same campaign
+        # each emit that campaign SDO. Deduplicate before trimming.
+        objects = STIXGenerator.dedupe_by_id(objects)
+        present = {obj["id"] for obj in objects}
+        relationships = [
+            rel for rel in STIXGenerator.dedupe_by_id(relationships)
+            if rel["id"] not in present
+        ]
+
+        remaining = max(0, count - len(objects))
+        if len(relationships) > remaining:
+            logger.debug(
+                f"Trimming relationships {len(relationships)} -> {remaining} to honour limit={count}"
+            )
+        objects.extend(relationships[:remaining])
+
         return objects
-    
-    @staticmethod
-    def generate_software_sdo():
-        """Generate a STIX Software SDO from database"""
-        from models import MaliciousSoftware
-        
-        software_obj = MaliciousSoftware.get_random_active()
-        if not software_obj:
-            return None
-        
-        software_id = f"software--{uuid.uuid4()}"
-        timestamp = STIXGenerator.generate_timestamp()
-        
-        software_sdo = {
-            "type": "software",
-            "spec_version": "2.1",
-            "id": software_id,
-            "created": timestamp,
-            "modified": timestamp,
-            "name": software_obj.package_name,
-            "version": software_obj.version,
-            "cpe": [software_obj.cpe],
-            "x_vendor": software_obj.vendor,
-            "x_malware_type": software_obj.malware_type,
-            "x_is_typosquat": software_obj.is_typosquat,
-            "x_confidence_score": software_obj.confidence_score,
-            "x_download_url": software_obj.download_url
-        }
-        
-        return software_sdo, software_obj
-    
-    @staticmethod
-    def generate_artifact_sco(software_obj):
-        """Generate a STIX Artifact SCO for a software package"""
-        artifact_id = f"artifact--{uuid.uuid4()}"
-        timestamp = STIXGenerator.generate_timestamp()
-        
-        artifact_sco = {
-            "type": "artifact",
-            "spec_version": "2.1",
-            "id": artifact_id,
-            "mime_type": "application/x-wheel+zip",
-            "hashes": {
-                "SHA-256": software_obj.artifact_hash
-            },
-            "x_file_name": f"{software_obj.package_name}-{software_obj.version}-py3-none-any.whl"
-        }
-        
-        return artifact_sco
-    
-    @staticmethod
-    def generate_url_sco(software_obj):
-        """Generate a STIX URL SCO for a software download location"""
-        url_id = f"url--{uuid.uuid4()}"
-        
-        url_sco = {
-            "type": "url",
-            "spec_version": "2.1",
-            "id": url_id,
-            "value": software_obj.download_url
-        }
-        
-        return url_sco
     
     @staticmethod
     def generate_software_indicator(software_obj):
         """
-        Generate a TIM-compatible STIX Indicator for malicious software.
+        Generate a STIX Indicator for malicious software.
         
-        Uses URL and file hash patterns that XSOAR TIM recognises, with
-        external_references containing the download URL and CPE identifier.
+        Uses PURL format in pattern: [software:name = 'pkg:pypi/package@version']
+        Labels: supply-chain, pypi, malicious-package for proper classification.
         """
         indicator_id = f"indicator--{uuid.uuid4()}"
         timestamp = STIXGenerator.generate_timestamp()
         score = STIXGenerator.convert_score_to_text(software_obj.confidence_score)
         
-        pattern = f"([url:value = '{software_obj.download_url}']) OR ([file:hashes.'SHA-256' = '{software_obj.artifact_hash}'])"
+        # Pattern uses PURL format for precise package identification
+        purl = f"pkg:pypi/{software_obj.package_name}@{software_obj.version}"
+        pattern = f"[software:name = '{purl}']"
         
         indicator = {
             "type": "indicator",
@@ -804,23 +880,23 @@ class STIXGenerator:
             "pattern": pattern,
             "pattern_type": "stix",
             "pattern_version": "2.1",
-            "labels": ["malicious-activity", "supply-chain-compromise"],
+            "labels": ["supply-chain", "pypi", "malicious-package"],
             "indicator_types": ["malicious-activity"],
-            "verdict": "malicious",
-            "score": score,
+            "x_verdict": "malicious",
+            "x_score": score,
             "valid_from": timestamp,
             "external_references": [
+                {
+                    "source_name": "purl",
+                    "external_id": purl,
+                    "url": f"https://pypi.org/project/{software_obj.package_name}/{software_obj.version}/",
+                    "description": f"Package URL (PURL) identifier for {software_obj.package_name}"
+                },
                 {
                     "source_name": "pypi",
                     "external_id": software_obj.package_name,
                     "url": software_obj.download_url,
                     "description": f"Malicious PyPI package {software_obj.package_name} v{software_obj.version}"
-                },
-                {
-                    "source_name": "cpe",
-                    "external_id": software_obj.cpe,
-                    "url": f"https://nvd.nist.gov/products/cpe/search/results?namingFormat=2.3&keyword={software_obj.package_name}",
-                    "description": "Common Platform Enumeration identifier"
                 }
             ]
         }
@@ -828,26 +904,83 @@ class STIXGenerator:
         return indicator
     
     @staticmethod
-    def generate_software_bundle():
+    def dedupe_by_id(objects):
+        """Keep the first occurrence of each STIX id, preserving order.
+
+        Some ids are deterministic by design so a client re-polling sees a
+        stable identity - campaign SDOs derive theirs with uuid5 from the
+        campaign row id. That means two software packages belonging to the same
+        campaign each emit a campaign SDO with the *same* id, and duplicate ids
+        in one bundle are invalid STIX. Deduplicating here keeps the stable-id
+        property while making the bundle well-formed.
         """
-        Generate a TIM-compatible software supply chain threat bundle.
+        seen = set()
+        unique = []
+        for obj in objects:
+            obj_id = obj.get("id")
+            if obj_id in seen:
+                continue
+            seen.add(obj_id)
+            unique.append(obj)
+        return unique
+
+    @staticmethod
+    def generate_software_bundle(software_obj=None):
+        """
+        Generate a software supply chain threat bundle.
         
-        Emits an Indicator SDO with URL/hash pattern that XSOAR TIM recognises,
-        plus campaign relationships using 'indicates' relationship type.
+        Emits:
+        - Software SDO (the entity representing the malicious package)
+        - Indicator SDO (pattern to detect the software)
+        - Relationship: indicator indicates software
+        - Campaign relationships if software is linked to a campaign
         """
+        from app import db
         from models import MaliciousSoftware, Campaign
         
-        software_obj = MaliciousSoftware.get_random_active()
+        if software_obj is None:
+            software_obj = MaliciousSoftware.get_random_active()
         if not software_obj:
             return []
         
+        # Generate Software SDO directly from the same software_obj
+        software_id = f"software--{uuid.uuid4()}"
+        timestamp = STIXGenerator.generate_timestamp()
+        
+        software_sdo = {
+            "type": "software",
+            "spec_version": "2.1",
+            "id": software_id,
+            "created": timestamp,
+            "modified": timestamp,
+            "name": software_obj.package_name,
+            "version": software_obj.version,
+            "x_vendor": software_obj.vendor,
+            "x_malware_type": software_obj.malware_type,
+            "x_is_typosquat": software_obj.is_typosquat,
+            "x_confidence_score": software_obj.confidence_score,
+            "x_download_url": software_obj.download_url
+        }
+        # STIX Software.cpe is a single CPE string, not an array.  A missing
+        # CPE is also different from a CPE value of null, so omit the
+        # property entirely when the repository has no CPE for this package.
+        if software_obj.cpe:
+            software_sdo["cpe"] = software_obj.cpe
+        
+        # Generate Indicator SDO (the detection pattern)
         indicator = STIXGenerator.generate_software_indicator(software_obj)
         
-        objects = [indicator]
+        objects = [software_sdo, indicator]
         relationships = []
         
+        # Core relationship: indicator indicates software (STIX 2.1 compliant)
+        relationships.append(STIXGenerator.generate_relationship(
+            indicator["id"], software_sdo["id"], "indicates",
+            f"Indicator pattern detects malicious software package {software_obj.package_name}"
+        ))
+        
         if software_obj.campaign_id:
-            campaign = Campaign.query.get(software_obj.campaign_id)
+            campaign = db.session.get(Campaign, software_obj.campaign_id)
             if campaign:
                 campaign_id = f"campaign--{uuid.uuid5(uuid.NAMESPACE_DNS, f'mocktaxii-campaign-{campaign.id}')}"
                 timestamp = STIXGenerator.generate_timestamp()
@@ -874,10 +1007,12 @@ class STIXGenerator:
                 
                 objects.append(campaign_sdo)
                 
+                # Campaign uses the malicious software
                 relationships.append(STIXGenerator.generate_relationship(
-                    indicator["id"], campaign_id, "indicates",
-                    f"Malicious package {software_obj.package_name} indicates {campaign.name}"
+                    campaign_id, software_sdo["id"], "uses",
+                    f"Campaign {campaign.name} uses malicious package {software_obj.package_name}"
                 ))
+                
         
         objects.extend(relationships)
         

@@ -1,3 +1,7 @@
+{#
+SPDX-FileCopyrightText: GoCortexIO
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
 {% extends "base.html" %}
 
 {% block title %}MockTAXII - Home{% endblock %}
@@ -6,23 +10,26 @@
 <div class="row">
     <div class="col-lg-8">
         <!-- Hero Section -->
-        <div class="card bg-primary mb-3">
+        <div class="card mb-3">
             <div class="card-body text-center py-4">
                 <div class="mb-3">
-                    <img src="{{ url_for('static', filename='mocktaxii-logo.png') }}" alt="MockTAXII" height="307" class="d-block mx-auto">
+                    <img src="{{ url_for('static', filename='mocktaxii-logo.png') }}"
+                         alt="A green monster driving a customised taxi hot rod, the MockTAXII mascot"
+                         width="369" height="307"
+                         class="d-block mx-auto img-fluid" style="height:auto">
                 </div>
                 <p class="lead text-white mb-4">
-                    Lightweight TAXII 2.x server for XSIAM demonstrations
+                    Lightweight TAXII 2.x server for demonstrations with the Palo Alto Networks Cortex Platform and other TAXII clients
                 </p>
                 <div class="row text-center">
                     <div class="col-md-6">
-                        <h2 class="display-6" style="color: #FFC107;" id="indicator-counter">
+                        <h2 class="display-6 mt-counter" id="indicator-counter">
                             {{ "{:,}".format(stats.total_indicators_served) }}
                         </h2>
                         <p class="text-white">Indicators Served</p>
                     </div>
                     <div class="col-md-6">
-                        <h2 class="display-6" style="color: #FFC107;">
+                        <h2 class="display-6 mt-counter">
                             {{ "{:,}".format(stats.total_requests) }}
                         </h2>
                         <p class="text-white">API Requests</p>
@@ -35,7 +42,7 @@
         <div class="card mb-3">
             <div class="card-header">
                 <h4 class="mb-0">
-                    <i class="fas fa-rocket me-2"></i>Quick Start Guide
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-rocket"></use></svg>Quick Start Guide
                 </h4>
             </div>
             <div class="card-body">
@@ -45,19 +52,19 @@
                         Visit the <a href="{{ url_for('api_keys') }}" class="text-decoration-none">API Keys</a> page to create your authentication token.
                     </li>
                     <li class="mb-2">
-                        <strong>Configure XSIAM:</strong> 
+                        <strong>Configure your TAXII client:</strong> 
                         Setup your threat intelligence consumer to connect to our TAXII endpoints using the generated API key.
                     </li>
                     <li class="mb-2">
                         <strong>Start polling:</strong> 
-                        XSIAM will automatically receive fresh indicators for demonstration purposes.
+                        Your client will automatically receive fresh indicators for demonstration purposes.
                     </li>
                 </ol>
                 
                 <div class="alert alert-info">
-                    <i class="fas fa-info-circle me-2"></i>
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-info-circle"></use></svg>
                     <strong>Demo Data:</strong> All threat intelligence is mocked for demonstration purposes. 
-                    Perfect for showcasing XSIAM integrations without real threat data.
+                    Perfect for showcasing threat scenarios in the Palo Alto Networks Cortex Platform, or other TAXII 2.1 clients, without real threat data.
                 </div>
             </div>
         </div>
@@ -68,7 +75,7 @@
         <div class="card mb-3">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <i class="fas fa-link me-2"></i>TAXII 2.x Endpoints
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-link"></use></svg>TAXII 2.x Endpoints
                 </h5>
             </div>
             <div class="card-body">
@@ -76,8 +83,9 @@
                     <label class="form-label small text-muted">Discovery</label>
                     <div class="input-group">
                         <input type="text" class="form-control form-control-sm" value="/taxii2/" readonly>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard(this)">
-                            <i class="fas fa-copy"></i>
+                        <button class="btn btn-outline-secondary btn-sm" type="button"
+                                onclick="copyToClipboard(this)" aria-label="Copy the Discovery URL">
+                            <svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>
                         </button>
                     </div>
                 </div>
@@ -86,8 +94,9 @@
                     <label class="form-label small text-muted">API Root</label>
                     <div class="input-group">
                         <input type="text" class="form-control form-control-sm" value="/taxii2/api/" readonly>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard(this)">
-                            <i class="fas fa-copy"></i>
+                        <button class="btn btn-outline-secondary btn-sm" type="button"
+                                onclick="copyToClipboard(this)" aria-label="Copy the API root URL">
+                            <svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>
                         </button>
                     </div>
                 </div>
@@ -96,8 +105,9 @@
                     <label class="form-label small text-muted">Collections</label>
                     <div class="input-group">
                         <input type="text" class="form-control form-control-sm" value="/taxii2/api/collections/" readonly>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard(this)">
-                            <i class="fas fa-copy"></i>
+                        <button class="btn btn-outline-secondary btn-sm" type="button"
+                                onclick="copyToClipboard(this)" aria-label="Copy the collections URL">
+                            <svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>
                         </button>
                     </div>
                 </div>
@@ -106,8 +116,9 @@
                     <label class="form-label small text-muted">Objects</label>
                     <div class="input-group">
                         <input type="text" class="form-control form-control-sm" value="/taxii2/api/collections/threat-intel-demo/objects/" readonly>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard(this)">
-                            <i class="fas fa-copy"></i>
+                        <button class="btn btn-outline-secondary btn-sm" type="button"
+                                onclick="copyToClipboard(this)" aria-label="Copy the objects URL">
+                            <svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg>
                         </button>
                     </div>
                 </div>
@@ -118,7 +129,7 @@
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <i class="fas fa-clock me-2"></i>Recent Activity (UTC)
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-clock"></use></svg>Recent Activity (UTC)
                 </h5>
             </div>
             <div class="card-body">
@@ -129,7 +140,7 @@
                                 <small class="text-muted">{{ request.endpoint or 'Unknown' }}</small>
                                 {% if request.indicators_served %}
                                     <div class="text-success small">
-                                        <i class="fas fa-shield-alt me-1"></i>{{ request.indicators_served }} indicators
+                                        <svg class="icon me-1" aria-hidden="true"><use href="#i-shield-alt"></use></svg>{{ request.indicators_served }} indicators
                                     </div>
                                 {% endif %}
                             </div>
@@ -155,7 +166,7 @@ function copyToClipboard(button) {
     document.execCommand('copy');
     
     const originalIcon = button.innerHTML;
-    button.innerHTML = '<i class="fas fa-check"></i>';
+    button.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>';
     setTimeout(() => {
         button.innerHTML = originalIcon;
     }, 2000);

@@ -1,3 +1,7 @@
+{#
+SPDX-FileCopyrightText: GoCortexIO
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
 {% extends "base.html" %}
 
 {% block title %}Custom Bundles - MockTAXII{% endblock %}
@@ -8,7 +12,7 @@
         <div class="card mb-4">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <i class="fas fa-upload me-2"></i>Upload Bundle
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-upload"></use></svg>Upload Bundle
                 </h5>
             </div>
             <div class="card-body">
@@ -53,7 +57,7 @@
                     </div>
                     
                     <button type="submit" class="btn btn-primary w-100">
-                        <i class="fas fa-upload me-2"></i>Upload Bundle
+                        <svg class="icon me-2" aria-hidden="true"><use href="#i-upload"></use></svg>Upload Bundle
                     </button>
                 </form>
             </div>
@@ -62,7 +66,7 @@
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <i class="fas fa-info-circle me-2"></i>How It Works
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-info-circle"></use></svg>How It Works
                 </h5>
             </div>
             <div class="card-body small">
@@ -84,7 +88,7 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0">
-                    <i class="fas fa-cubes me-2"></i>Custom Bundles
+                    <svg class="icon me-2" aria-hidden="true"><use href="#i-cubes"></use></svg>Custom Bundles
                 </h4>
                 <span class="badge bg-secondary">{{ bundles|length }} bundle(s)</span>
             </div>
@@ -142,18 +146,18 @@
                                             <div class="btn-group btn-group-sm">
                                                 <a href="{{ url_for('view_bundle', bundle_id=bundle.id) }}" 
                                                    class="btn btn-outline-secondary" title="View">
-                                                    <i class="fas fa-eye"></i>
+                                                    <svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg>
                                                 </a>
                                                 <a href="{{ url_for('download_bundle', bundle_id=bundle.id) }}" 
                                                    class="btn btn-outline-secondary" title="Download">
-                                                    <i class="fas fa-download"></i>
+                                                    <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
                                                 </a>
                                                 <form method="POST" action="{{ url_for('toggle_bundle', bundle_id=bundle.id) }}" 
                                                       style="display: inline;">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                     <button type="submit" class="btn btn-outline-{% if bundle.is_active %}warning{% else %}success{% endif %}" 
                                                             title="{% if bundle.is_active %}Deactivate{% else %}Activate{% endif %}">
-                                                        <i class="fas fa-{% if bundle.is_active %}pause{% else %}play{% endif %}"></i>
+                                                        <svg class="icon" aria-hidden="true"><use href="#i-{% if bundle.is_active %}pause{% else %}play{% endif %}"></use></svg>
                                                     </button>
                                                 </form>
                                                 <form method="POST" action="{{ url_for('delete_bundle', bundle_id=bundle.id) }}" 
@@ -161,7 +165,7 @@
                                                       onsubmit="return confirm('Are you sure you want to delete this bundle?')">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                                     <button type="submit" class="btn btn-outline-danger" title="Delete">
-                                                        <i class="fas fa-trash"></i>
+                                                        <svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg>
                                                     </button>
                                                 </form>
                                             </div>
@@ -173,7 +177,7 @@
                     </div>
                 {% else %}
                     <div class="text-center py-5">
-                        <i class="fas fa-cubes fa-3x text-muted mb-3"></i>
+                        <svg class="icon icon-3x text-muted mb-3" aria-hidden="true"><use href="#i-cubes"></use></svg>
                         <h5 class="text-muted">No Custom Bundles</h5>
                         <p class="text-muted">Upload your first custom STIX bundle to serve pre-made threat intelligence.</p>
                     </div>

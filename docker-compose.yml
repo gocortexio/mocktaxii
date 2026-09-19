@@ -1,4 +1,15 @@
-# MockTAXII v0.7.0 - Production-ready TAXII 2.x server for XSIAM and XSOAR TIM demonstrations
+# SPDX-FileCopyrightText: GoCortexIO
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# MockTAXII v1.1.4 - TAXII 2.x server for Cortex Platform and TAXII client testing
+#
+# Local/lab stack. Values below interpolate from a .env file in this directory
+# when one exists (deploy.sh generates one) and fall back to local-only
+# defaults otherwise. Nothing secret is hardcoded here.
+
+# Pin the Compose project name so it does not depend on the checkout
+# directory being called "mocktaxii".
+name: mocktaxii
 
 services:
   web:
@@ -6,29 +17,61 @@ services:
     ports:
       - "5001:5000"
     environment:
-      - DATABASE_URL=postgresql://mocktaxii:mocktaxii@db:5432/mocktaxii
-      - SESSION_SECRET=your-secret-key-here-change-in-production
-      - WTF_CSRF_ENABLED=false
+      - DATABASE_URL=postgresql://mocktaxii:${POSTGRES_PASSWORD:-mocktaxii}@db:5432/mocktaxii
+      # Deliberately not defaulted. Unset, the app generates a development key
+      # shared across workers and warns loudly; set, it is used as given. This
+      # previously carried a placeholder literal committed to the repository,
+      # which let anyone forge an authenticated admin session.
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # No proxy in front of this stack, so X-Forwarded-* must not be trusted.
+      - TRUST_PROXY=false
+      # Pinned, not read from .env. This stack is plain HTTP by definition, and
+      # production mode sets Secure cookies and strict HTTPS CSRF, which would
+      # make the admin UI unreachable here. deploy.sh used to write
+      # FLASK_ENV=production into .env where it was silently ignored; it now
+      # writes development, so the file and the behaviour agree.
       - FLASK_ENV=development
       - MALICIOUS_IP_TARGET_COUNT=${MALICIOUS_IP_TARGET_COUNT:-5000}
       - SKIP_SEEDING=${SKIP_SEEDING:-false}
+      - REQUEST_LOG_RETENTION_DAYS=${REQUEST_LOG_RETENTION_DAYS:-90}
+      # Documented in the README and production.env.template but previously
+      # never reached the container, so setting them had no effect at all.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-10}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-20}
+      - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      - DB_POOL_RECYCLE=${DB_POOL_RECYCLE:-300}
+      - MOCKTAXII_STATE_DIR=${MOCKTAXII_STATE_DIR:-/tmp}
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - mocktaxii-network
+    # Matches deploy/docker-compose.prod.yml, so the lab stack does not run
+    # with weaker confinement than the thing it is standing in for.
+    security_opt:
+      - no-new-privileges:true
 
   db:
-    image: postgres:15
+    # NB: two upgrade hazards here.
+    # 1. A PostgreSQL major-version bump will not start against a data
+    #    directory created by an older major. Run `docker compose down -v`
+    #    (the entrypoint reseeds from init_db.py) or dump and restore.
+    # 2. postgres:18+ expects the volume at /var/lib/postgresql, not
+    #    /var/lib/postgresql/data, and stores data in a version subdirectory.
+    image: postgres:18
     environment:
       - POSTGRES_DB=mocktaxii
       - POSTGRES_USER=mocktaxii
-      - POSTGRES_PASSWORD=mocktaxii
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mocktaxii}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     ports:
-      - "5432:5432"
+      # Loopback only. Previously published on every interface with a default
+      # password, exposing the database to the local network.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mocktaxii"]
       interval: 10s
